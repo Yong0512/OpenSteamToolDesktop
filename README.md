@@ -13,6 +13,10 @@
   <img src="https://img.shields.io/github/downloads/yong0512/OpenSteamToolDesktop/total" alt="Downloads">
 </p>
 
+<p align="center">
+  <a href="README_EN.md">English</a>
+</p>
+
 ---
 
 > ⚠️ **仅支持 Windows 10 / Windows 11 64 位系统**，需要已安装 Steam 客户端并登录。不支持 macOS / Linux。
