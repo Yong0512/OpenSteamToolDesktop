@@ -1,7 +1,7 @@
 <h1 align="center">OpenSteamTool-Desktop</h1>
 
 <p align="center">
-  基于 <a href="https://github.com/OpenSteamTool/OpenSteamTool">OpenSteamTool</a> 的 Steam 游戏库管理桌面工具<br>
+  基于 <a href="https://github.com/OpenSteam001/OpenSteamTool">OpenSteamTool</a> 的 Steam 游戏库管理桌面工具<br>
   Windows 11 Fluent Design 风格 GUI，一站式游戏解锁与管理体验
 </p>
 
@@ -152,7 +152,7 @@ OpenSteamTool 是通过 DLL 注入 Steam 客户端的 C++ 引擎，本工具为�
 
 ## 开源许可
 
-本项目基于底层引擎 [OpenSteamTool](https://github.com/OpenSteamTool/OpenSteamTool) 为开源项目。
+本项目基于底层引擎 [OpenSteamTool](https://github.com/OpenSteam001/OpenSteamTool) 为开源项目。
 
 ---
 
