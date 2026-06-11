@@ -168,6 +168,12 @@ OpenSteamTool 是通过 DLL 注入 Steam 客户端的 C++ 引擎，本工具为�
 
 ---
 
+## Star 走势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yong0512/OpenSteamToolDesktop&type=Date)](https://star-history.com/#yong0512/OpenSteamToolDesktop&Date)
+
+---
+
 <p align="center">
   <sub>Made with ❤️ for the Steam community</sub>
 </p>

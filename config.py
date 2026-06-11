@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME: str = "OpenSteamToolDesktop"
-APP_VERSION: str = "1.0.0"
+APP_VERSION: str = "1.0.1"
 
 CONFIG_DIR: str = str(Path.home() / f".{APP_NAME}")
 os.makedirs(CONFIG_DIR, exist_ok=True)

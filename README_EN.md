@@ -168,6 +168,12 @@ This project is powered by the [OpenSteamTool](https://github.com/OpenSteam001/O
 
 ---
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yong0512/OpenSteamToolDesktop&type=Date)](https://star-history.com/#yong0512/OpenSteamToolDesktop&Date)
+
+---
+
 <p align="center">
   <sub>Made with ❤️ for the Steam community</sub>
 </p>
