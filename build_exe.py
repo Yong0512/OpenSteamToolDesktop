@@ -118,7 +118,7 @@ def build_nuitka():
         print(f"\nBuild failed with return code {result.returncode}")
         sys.exit(result.returncode)
 
-    exe_path = DIST_DIR / "OpenSteamTool.exe"
+    exe_path = DIST_DIR / "OpenSteamToolDesktop.exe"
     if not exe_path.exists():
         print(f"\nBuild finished, but exe not found at expected path: {exe_path}")
         sys.exit(1)
