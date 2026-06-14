@@ -150,8 +150,16 @@ class GitHubReleases(QObject):
                 # 降级方案：尝试构造下载链接
                 return self._guess_download_url(version)
 
-            # 取第一个匹配的 ZIP 文件
-            download_path = matches[0]
+            # 优先选择 Debug 版本，其次 Release 版本
+            download_path = None
+            for match in matches:
+                if "-Debug.zip" in match:
+                    download_path = match
+                    break
+            if download_path is None:
+                # 如果没有 Debug 版本，使用第一个匹配的 ZIP
+                download_path = matches[0]
+
             download_url = f"https://github.com{download_path}"
             logger.info(f"Found ZIP download URL: {download_url}")
             return download_url
@@ -171,10 +179,10 @@ class GitHubReleases(QObject):
         Returns:
             下载 URL，如果构造失败则返回 None
         """
-        # 常见的文件名模式
+        # 常见的文件名模式（优先 Debug）
         possible_names = [
-            f"OpenSteamTool-{version}-Release.zip",
             f"OpenSteamTool-{version}-Debug.zip",
+            f"OpenSteamTool-{version}-Release.zip",
             f"OpenSteamTool-{version}.zip",
         ]
 
