@@ -1,16 +1,25 @@
+"""
+AppState — 全局应用状态（单例）
+
+所有页面共享的单一状态源。一处改动，所有观察者自动刷新。
+"""
 from __future__ import annotations
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+# 状态键常量
 STEAM_INSTALLED = "steam_installed"
 STEAM_RUNNING = "steam_running"
 STEAM_PATH = "steam_path"
-DLL_DEPLOYED = "dll_deployed"
-DLL_ACTIVE = "dll_active"
+DLL_DEPLOYED = "dll_deployed"       # DLL 文件已部署到 Steam 目录
+DLL_ACTIVE = "dll_active"           # DLL 已加载到 Steam 进程（Debug/Release 均有效）
 GAME_COUNT = "game_count"
 
-class AppState(QObject):
 
+class AppState(QObject):
+    """全局应用状态单例"""
+
+    # 当注入相关状态变化时发射
     injection_changed = pyqtSignal()
 
     _instance: AppState | None = None
@@ -30,6 +39,7 @@ class AppState(QObject):
     def get(self, key: str, default=None):
         return self._state.get(key, default)
 
+    # 状态变化时触发信号的键
     _SIGNAL_KEYS = (DLL_DEPLOYED, DLL_ACTIVE, STEAM_INSTALLED, STEAM_RUNNING, STEAM_PATH, GAME_COUNT)
 
     def set(self, key: str, value):
@@ -48,4 +58,6 @@ class AppState(QObject):
         if changed:
             self.injection_changed.emit()
 
+
+# 便捷访问
 app_state = AppState.instance()

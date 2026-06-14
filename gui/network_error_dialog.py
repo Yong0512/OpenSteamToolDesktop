@@ -1,9 +1,13 @@
+"""
+网络错误弹窗 — 使用 qfluentwidgets 风格
+"""
 from __future__ import annotations
 
 import webbrowser
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QDialog, QLabel, QWidget
+
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, TitleLabel, BodyLabel,
     FluentIcon, isDarkTheme,
@@ -13,6 +17,7 @@ from config import GITHUB_RELEASES_URL
 
 
 class NetworkErrorDialog(QDialog):
+    """网络连接失败弹窗"""
 
     def __init__(self, error_msg: str, parent=None):
         super().__init__(parent)
@@ -30,6 +35,7 @@ class NetworkErrorDialog(QDialog):
         layout.setContentsMargins(32, 24, 32, 24)
         layout.setSpacing(16)
 
+        # 图标 + 标题行
         header = QHBoxLayout()
         header.setSpacing(12)
 
@@ -49,10 +55,12 @@ class NetworkErrorDialog(QDialog):
         header.addStretch()
         layout.addLayout(header)
 
+        # 错误信息
         msg = BodyLabel(self._error_msg, self)
         msg.setWordWrap(True)
         layout.addWidget(msg)
 
+        # 建议
         hint = BodyLabel(
             "如果因网络限制无法访问 GitHub，可以安装 Watt Toolkit 来加速访问。",
             self,
@@ -63,6 +71,7 @@ class NetworkErrorDialog(QDialog):
 
         layout.addStretch()
 
+        # 按钮行
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
 

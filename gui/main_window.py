@@ -5,7 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
+
 from qfluentwidgets import (
     FluentIcon,
     NavigationItemPosition,
@@ -23,7 +25,9 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
 class MainWindow(MSFluentWindow):
+    """主窗口 — MSFluentWindow 架构"""
 
     def __init__(
         self,
@@ -39,20 +43,22 @@ class MainWindow(MSFluentWindow):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1200, 800)
         self.setMinimumSize(900, 600)
-
+        # 程序图标（兼容 PyInstaller 打包路径）
         if getattr(sys, 'frozen', False):
-            icon_path = Path(sys._MEIPASS) / "gui" / "icon.ico"
+            icon_path = Path(sys._MEIPASS) / "assets" / "icon.ico"
         else:
-            icon_path = Path(__file__).parent.parent / "gui" / "icon.ico"
+            icon_path = Path(__file__).parent.parent / "assets" / "icon.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         self.titleBar.raise_()
 
+        # 延迟导入页面
         from gui.home_page import HomePage
         from gui.inject_page import InjectPage
         from gui.search_page import SearchPage
         from gui.library_page import LibraryPage
 
+        # 创建页面
         self.home_page = HomePage(
             bridge,
             game_manager,
@@ -63,16 +69,22 @@ class MainWindow(MSFluentWindow):
         self.search_page = SearchPage(game_manager, bridge=bridge, parent=self)
         self.library_page = LibraryPage(game_manager, parent=self)
 
+        # ---- 全局状态订阅（一处改动，全局跟进） ----
         from core.app_state import app_state
         app_state.injection_changed.connect(self.home_page.refresh_status)
 
+        # 保留旧信号兼容（InjectPage 内部同步用）
         self.inject_page.inject_status_changed.connect(self.home_page.refresh_status)
 
+        # ---- 导航 ----
+
+        # 页面导航
         self._home_nav_btn = self.addSubInterface(self.home_page, FluentIcon.HOME, "首页")
         self._inject_nav_btn = self.addSubInterface(self.inject_page, FluentIcon.DOWNLOAD, "注入管理")
         self._search_nav_btn = self.addSubInterface(self.search_page, FluentIcon.SEARCH, "搜索入库")
         self._library_nav_btn = self.addSubInterface(self.library_page, FluentIcon.LIBRARY, "游戏库")
 
+        # 底部：重启 Steam 按钮
         self._restart_nav_item = self.navigationInterface.addItem(
             routeKey="restart_steam",
             icon=FluentIcon.POWER_BUTTON,
@@ -82,7 +94,12 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.BOTTOM,
         )
 
+        # 透明背景
         self.setStyleSheet("MSFluentWindow { background: transparent; }")
+
+        # 切换到默认页面
+
+    # ---- 页面路由 ----
 
     def _switch_to_default_page(self):
         try:
@@ -97,10 +114,12 @@ class MainWindow(MSFluentWindow):
         }
         self.switchTo(page_map.get(default, self.home_page))
 
+
     def switch_to_default_page(self):
         self._switch_to_default_page()
 
     def _switch_page(self, page_key: str):
+        """接收首页的页面跳转请求，切换到对应页面"""
         page_map = {
             "home": self.home_page,
             "inject": self.inject_page,
@@ -111,11 +130,14 @@ class MainWindow(MSFluentWindow):
         if target:
             self.switchTo(target)
 
-    def _on_restart_steam(self):
+    # ---- 重启 Steam ----
 
+    def _on_restart_steam(self):
+        """重启 Steam 客户端"""
+        # 先检测 Steam 是否已安装
         self._bridge.redetect_steam()
         steam_path = self._bridge.get_steam_path()
-
+        
         if not steam_path or not os.path.exists(steam_path):
             MessageBox(
                 "错误",
@@ -123,7 +145,7 @@ class MainWindow(MSFluentWindow):
                 self,
             ).exec()
             return
-
+        
         steam_exe = os.path.join(steam_path, "steam.exe")
         if not os.path.exists(steam_exe):
             MessageBox(
@@ -132,7 +154,7 @@ class MainWindow(MSFluentWindow):
                 self,
             ).exec()
             return
-
+        
         dialog = MessageBox(
             "重启 Steam",
             "确定要重启 Steam 吗？\n\n这将关闭当前运行的 Steam 并重新启动。",
@@ -141,6 +163,7 @@ class MainWindow(MSFluentWindow):
         if not dialog.exec():
             return
 
+        # 1. 关闭 Steam
         try:
             subprocess.run(
                 ["taskkill", "/F", "/IM", "steam.exe"],
@@ -151,6 +174,7 @@ class MainWindow(MSFluentWindow):
         except Exception:
             pass
 
+        # 2. 重新启动 Steam
         try:
             subprocess.Popen([steam_exe])
             InfoBar.success(
@@ -167,17 +191,24 @@ class MainWindow(MSFluentWindow):
                 position=InfoBarPosition.TOP,
             )
 
+    # ---- 重启按钮状态 ----
+
     def _update_restart_button_state(self):
+        """根据 Steam 安装状态启用/禁用重启按钮"""
         steam_path = self._bridge.get_steam_path()
         installed = bool(steam_path and os.path.exists(steam_path))
         self.set_restart_button_enabled(installed)
 
     def _on_steam_status_changed(self, installed: bool):
+        """响应首页 Steam 状态变化"""
         self.set_restart_button_enabled(installed)
 
     def set_restart_button_enabled(self, enabled: bool):
+        """设置重启按钮是否可用"""
         if hasattr(self, "_restart_nav_item"):
             self._restart_nav_item.setEnabled(enabled)
+
+    # ---- 主题通知 ----
 
     def notify_theme_changed(self):
         pages = [self.home_page, self.inject_page, self.search_page, self.library_page]
@@ -187,13 +218,18 @@ class MainWindow(MSFluentWindow):
             page.update()
             page.repaint()
 
+    # ---- 窗口特效 ----
+
     def apply_window_effect(self, effect: str):
         if effect == "mica":
             self.setMicaEffectEnabled(True)
         else:
             self.setMicaEffectEnabled(False)
 
+    # ---- 生命周期 ----
+
     def closeEvent(self, event):
+        """窗口关闭时完整清理所有后台线程，防止 QThread 销毁时仍在运行导致崩溃"""
         logger.info("MainWindow closing, cleaning up threads...")
         try:
             self.shutdown()
@@ -202,8 +238,10 @@ class MainWindow(MSFluentWindow):
         event.accept()
 
     def shutdown(self):
+        """清理所有页面的后台线程和资源"""
         pages = [self.home_page, self.inject_page, self.search_page, self.library_page]
 
+        # 1. 停止定时器
         for page in pages:
             if hasattr(page, '_auto_refresh_timer') and page._auto_refresh_timer is not None:
                 try:
@@ -211,12 +249,14 @@ class MainWindow(MSFluentWindow):
                 except Exception:
                     pass
 
+        # 2. 停止 ThreadPoolExecutor（home_page 的全局 executor）
         try:
             from gui.home_page import _executor
             _executor.shutdown(wait=True, cancel_futures=True)
         except Exception:
             pass
 
+        # 3. 取消所有页面的活跃 worker 并等待完成
         for page in pages:
             try:
                 if hasattr(page, '_cancel_all_workers'):
@@ -224,14 +264,16 @@ class MainWindow(MSFluentWindow):
             except Exception:
                 pass
 
+        # 4. LibraryPage 额外清理
         try:
             self.library_page._alive = False
             if hasattr(self.library_page, 'hideEvent'):
-
-                pass
+                # 触发 hideEvent 中的清理逻辑
+                pass  # hideEvent 需要 QHideEvent 参数，这里直接调用关键清理
         except Exception:
             pass
 
+        # 5. 清理 SearchPage 的卡片（递归清理所有子卡片线程）
         try:
             if hasattr(self.search_page, '_cards'):
                 for card in self.search_page._cards:
@@ -250,6 +292,7 @@ class MainWindow(MSFluentWindow):
         except Exception:
             pass
 
+        # 6. 清理 LibraryPage 的卡片
         try:
             if hasattr(self.library_page, '_card_list'):
                 for card in self.library_page._card_list:

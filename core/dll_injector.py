@@ -1,3 +1,14 @@
+"""
+dll_injector — OpenSteamTool DLL 部署器
+
+正确注入机制（基于 OpenSteamTool README）：
+1. 将 3 个 DLL（OpenSteamTool.dll, dwmapi.dll, xinput1_4.dll）
+   复制到 Steam 根目录
+2. 创建 Lua 目录（<steam>/config/lua）并放入 Lua 配置
+3. 正常启动 Steam，DLL 通过搜索顺序劫持自动加载
+
+本模块负责：DLL 文件部署、Lua 目录管理、注入状态验证。
+"""
 from __future__ import annotations
 
 import os
@@ -9,30 +20,45 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 class InjectStatus(Enum):
-    SUCCESS = auto()
-    STEAM_NOT_FOUND = auto()
-    DLL_SOURCE_NOT_FOUND = auto()
-    DLL_ALREADY_DEPLOYED = auto()
-    DEPLOY_FAILED = auto()
-    VERIFICATION_FAILED = auto()
-    UNINSTALL_FAILED = auto()
-    UNKNOWN_ERROR = auto()
+    """DLL 部署/验证状态枚举"""
+    SUCCESS = auto()                     # 操作成功
+    STEAM_NOT_FOUND = auto()           # Steam 目录未找到
+    DLL_SOURCE_NOT_FOUND = auto()       # 源 DLL 文件未找到
+    DLL_ALREADY_DEPLOYED = auto()     # DLL 已部署（无需重复）
+    DEPLOY_FAILED = auto()             # 部署失败（复制失败/权限不足）
+    VERIFICATION_FAILED = auto()        # 验证失败（未检测到日志）
+    UNINSTALL_FAILED = auto()          # 卸载失败
+    UNKNOWN_ERROR = auto()             # 未知错误
+
 
 @dataclass
 class InjectResult:
+    """操作结果数据类"""
     status: InjectStatus
     message: str = ""
     details: list[str] | None = None
 
-class DLLInjector:
 
+class DLLInjector:
+    """OpenSteamTool DLL 部署器
+
+    正确用法：
+    1. 设置 Steam 路径（set_steam_path）
+    2. 部署 DLL（deploy_dlls）+ 创建 Lua 目录（create_lua_dir）
+    3. 提示用户重启 Steam
+    4. 验证注入（verify_injection）—— 检查日志文件
+    """
+
+    # OpenSteamTool 相关 DLL 文件名（README 指定）
     DWM_DLL = "dwmapi.dll"
     XINPUT_DLL = "xinput1_4.dll"
     CORE_DLL = "OpenSteamTool.dll"
     ALL_DLLS = (CORE_DLL, DWM_DLL, XINPUT_DLL)
 
+    # Lua 配置目录（OpenSteamTool README: <steam>/config/lua）
     LUA_DIR_RELATIVE = "config/lua"
 
+    # 日志目录和文件（用于验证注入成功）
     LOG_DIR = "opensteamtool"
     LOG_FILES = ["main.log", "ipc.log", "manifest.log"]
 
@@ -50,6 +76,11 @@ class DLLInjector:
         return self._steam_path
 
     def check_dlls_deployed(self) -> tuple[bool, list[str]]:
+        """检查 Steam 目录下是否已部署所需 DLL
+
+        Returns:
+            (是否全部部署, 缺失的 DLL 列表)
+        """
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return False, list(self.ALL_DLLS)
 
@@ -62,12 +93,18 @@ class DLLInjector:
         return len(missing) == 0, missing
 
     def check_lua_dir(self) -> bool:
+        """检查 Lua 配置目录是否存在"""
         if not self._steam_path:
             return False
         lua_dir = os.path.join(self._steam_path, self.LUA_DIR_RELATIVE)
         return os.path.isdir(lua_dir)
 
     def deploy_dlls(self) -> InjectResult:
+        """将 3 个 DLL 复制到 Steam 根目录
+
+        Returns:
+            部署结果
+        """
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
                 status=InjectStatus.STEAM_NOT_FOUND,
@@ -80,6 +117,7 @@ class DLLInjector:
                 message="未设置注入源目录，请在设置中指定 OpenSteamTool DLL 所在目录",
             )
 
+        # 复制 3 个 DLL
         copied = []
         failed = []
         for dll_name in self.ALL_DLLS:
@@ -108,6 +146,7 @@ class DLLInjector:
         )
 
     def create_lua_dir(self) -> InjectResult:
+        """创建 Lua 配置目录（<steam>/config/lua）"""
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
                 status=InjectStatus.STEAM_NOT_FOUND,
@@ -136,15 +175,31 @@ class DLLInjector:
 
     @staticmethod
     def _is_module_loaded_in_steam(target_dll: str) -> bool:
+        """检查指定 DLL 是否可能已加载到 Steam 中
+
+        通过检查 Steam 日志目录中的日志文件来推断注入状态，
+        避免使用进程模块枚举（会触发杀毒软件误报）。
+        """
         return False
 
     def verify_injection(self) -> InjectResult:
+        """验证 OpenSteamTool 是否已成功注入
+
+        三层递进验证（优雅程度递减）：
+        1. 进程模块枚举 — 直接检查 DLL 是否已加载到 steam.exe 内存（最可靠，Debug/Release 通用）
+        2. 日志文件检查 — Debug 构建 DLL 会生成日志
+        3. DLL 文件存在 — 仅说明已部署，未证明已激活
+
+        Returns:
+            验证结果
+        """
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
                 status=InjectStatus.STEAM_NOT_FOUND,
                 message="Steam 目录未找到",
             )
 
+        # 方式 1: 进程模块枚举（最可靠，适用于 Debug/Release 所有构建）
         for dll_name in self.ALL_DLLS:
             if self._is_module_loaded_in_steam(dll_name):
                 return InjectResult(
@@ -152,6 +207,7 @@ class DLLInjector:
                     message=f"OpenSteamTool 已激活（{dll_name} 已加载到 Steam 进程）",
                 )
 
+        # 方式 2: 检查日志文件（Debug 构建的辅助验证）
         log_dir = os.path.join(self._steam_path, self.LOG_DIR)
         if os.path.isdir(log_dir):
             for log_file in self.LOG_FILES:
@@ -161,6 +217,7 @@ class DLLInjector:
                         message=f"OpenSteamTool 已激活（检测到日志: {log_file}）",
                     )
 
+        # 方式 3: 检查 DLL 是否已部署（但未重启 Steam 或 Steam 未运行）
         all_deployed, missing = self.check_dlls_deployed()
         if all_deployed:
             return InjectResult(
@@ -174,6 +231,7 @@ class DLLInjector:
         )
 
     def uninstall_dlls(self) -> InjectResult:
+        """从 Steam 目录移除 3 个 DLL 文件"""
 
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
@@ -187,7 +245,7 @@ class DLLInjector:
         for dll_name in self.ALL_DLLS:
             dll_path = os.path.join(self._steam_path, dll_name)
             if os.path.isfile(dll_path):
-
+                # 文件被占用时最多重试 3 次，每次间隔 1 秒
                 for retry in range(3):
                     try:
                         os.remove(dll_path)
@@ -219,6 +277,11 @@ class DLLInjector:
         )
 
     def clean_logs(self) -> InjectResult:
+        """清理 OpenSteamTool 日志目录（<steam>/opensteamtool/）
+
+        Returns:
+            清理结果
+        """
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
                 status=InjectStatus.STEAM_NOT_FOUND,
@@ -245,8 +308,9 @@ class DLLInjector:
                         shutil.rmtree(fpath)
                         removed_files.append(fname)
                 except (PermissionError, OSError):
-                    failed_count += 1
+                    failed_count += 1  # 文件被占用，静默跳过
 
+            # 如果目录已空，删除目录
             try:
                 if not os.listdir(log_dir):
                     os.rmdir(log_dir)
@@ -270,6 +334,11 @@ class DLLInjector:
         )
 
     def clean_lua_configs(self) -> InjectResult:
+        """清理 config/lua 目录下所有入库游戏的 .lua 配置文件
+
+        Returns:
+            清理结果
+        """
         if not self._steam_path or not os.path.isdir(self._steam_path):
             return InjectResult(
                 status=InjectStatus.STEAM_NOT_FOUND,

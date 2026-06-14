@@ -1,6 +1,16 @@
+"""
+OpenSteamToolDesktop 打包脚本
+==============================
+
+用法:
+    python build_exe.py              # PyInstaller 打包（默认）
+    python build_exe.py --nuitka     # Nuitka 编译打包（代码保护更强）
+    python build_exe.py --clean      # 清理构建产物
+"""
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -10,9 +20,11 @@ PROJECT_ROOT = Path(__file__).parent
 DIST_DIR = PROJECT_ROOT / "dist"
 BUILD_DIR = PROJECT_ROOT / "build"
 SPEC_FILE = PROJECT_ROOT / "OpenSteamToolDesktop.spec"
-ICON_PATH = PROJECT_ROOT / "gui" / "icon.ico"
+ICON_PATH = PROJECT_ROOT / "assets" / "icon.ico"
+
 
 def clean():
+    """清理构建产物"""
     for d in [DIST_DIR, BUILD_DIR]:
         if d.exists():
             print(f"Removing {d}")
@@ -32,7 +44,9 @@ def clean():
 
     print("Clean complete.")
 
+
 def build_pyinstaller():
+    """执行 PyInstaller 打包"""
     if not SPEC_FILE.exists():
         print(f"Error: {SPEC_FILE} not found.")
         sys.exit(1)
@@ -76,7 +90,9 @@ def build_pyinstaller():
     print(f"\nBuild successful!")
     print(f"Output: {exe_path}  ({size_mb:.1f} MB)")
 
+
 def build_nuitka():
+    """执行 Nuitka 编译打包（C++ 编译，单文件，代码保护更强）"""
     print("=" * 60)
     print("OpenSteamToolDesktop Nuitka Onefile Build")
     print("=" * 60)
@@ -127,6 +143,7 @@ def build_nuitka():
     print(f"\nBuild successful!")
     print(f"Output: {exe_path}  ({size_mb:.1f} MB)")
 
+
 def main():
     parser = argparse.ArgumentParser(description="OpenSteamToolDesktop Build Script")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts only")
@@ -141,6 +158,7 @@ def main():
             build_nuitka()
         else:
             build_pyinstaller()
+
 
 if __name__ == "__main__":
     main()

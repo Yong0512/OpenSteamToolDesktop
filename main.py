@@ -1,14 +1,29 @@
+"""OpenSteamToolDesktop 应用程序入口。
+
+启动流程：
+    1. 崩溃诊断初始化（faulthandler + Windows Dump）
+    2. Qt 消息处理器安装
+    3. 主题/配置加载
+    4. 版本更新检查
+    5. Steam Bridge + GameManager 初始化
+    6. 主窗口创建与显示
+"""
 from __future__ import annotations
 
-import faulthandler
 import io
 import logging
 import os
 import sys
 import traceback
+from pathlib import Path
+
+import faulthandler
+
+# ── 崩溃诊断全开 ──────────────────────────────────────────────
 
 from utils.path_manager import PathManager
 
+# PyInstaller windowed 模式下 sys.stderr 为 None，faulthandler 需要先重定向
 _logs_dir = PathManager.logs_dir()
 
 if sys.stderr is None:
@@ -17,6 +32,7 @@ if sys.stderr is None:
 
 faulthandler.enable(all_threads=True, file=sys.stderr)
 
+# 崩溃日志处理器
 _crash_handler: logging.FileHandler | None = None
 from config import CRASH_LOG_ENABLED
 if CRASH_LOG_ENABLED:
@@ -27,16 +43,19 @@ if CRASH_LOG_ENABLED:
         "[%(asctime)s] [%(levelname)s] %(message)s"
     ))
 
+# ── Qt 初始化 ─────────────────────────────────────────────────
+
 from PyQt6.QtCore import QEvent, QObject, Qt, QtMsgType, qInstallMessageHandler
 from PyQt6.QtWidgets import QApplication
 
+# 屏蔽 QFluentWidgets Pro 推广提示
 _old_stdout = sys.stdout
 sys.stdout = io.StringIO()
 from qfluentwidgets import setTheme, setThemeColor, Theme
 sys.stdout = _old_stdout
 
 from config import (
-    APP_NAME, APP_VERSION, DEFAULT_THEME_COLOR, LUA_DIR_RELATIVE,
+    APP_NAME, APP_VERSION, DEFAULT_THEME_COLOR, DEFAULT_THEME_MODE, LUA_DIR_RELATIVE,
 )
 from core.config_manager import ConfigManager
 from core.game_manager import LuaGameManager
@@ -46,11 +65,13 @@ from gui.main_window import MainWindow
 from gui.upgrade_dialog import UpgradeDialog
 from utils.logger import setup_logger
 
+
 def _qt_message_handler(
     msg_type: QtMsgType,
-    context: QtMsgType,
+    context: QtMsgType,  # type: ignore[override]
     msg: str,
 ) -> None:
+    """捕获所有 Qt 内部日志 → Python logger + crash.log 文件"""
     qt_logger = logging.getLogger("Qt")
     type_map = {
         QtMsgType.QtDebugMsg: qt_logger.debug,
@@ -76,7 +97,9 @@ def _qt_message_handler(
         except Exception:
             pass
 
+
 class _SafeApplication(QApplication):
+    """全局异常拦截：Qt 事件回调异常不传播到 Qt 层导致闪退"""
 
     def notify(self, receiver: QObject, event: QEvent) -> bool:
         try:
@@ -100,7 +123,9 @@ class _SafeApplication(QApplication):
                     pass
             return False
 
+
 def main() -> None:
+    """应用程序主入口"""
     qInstallMessageHandler(_qt_message_handler)
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -115,15 +140,18 @@ def main() -> None:
     logger.info("Application starting... %s v%s", APP_NAME, APP_VERSION)
     logger.info("=" * 60)
 
+    # 全局异常钩子
     def _global_excepthook(exc_type, exc_value, exc_tb):
         logger.critical("Unhandled exception:", exc_info=(exc_type, exc_value, exc_tb))
         sys.__excepthook__(exc_type, exc_value, exc_tb)
     sys.excepthook = _global_excepthook
 
+    # ── 配置 ──
     logger.debug("Initializing ConfigManager...")
     config_manager = ConfigManager()
     logger.debug("Config loaded from: %s", config_manager.config_file)
 
+    # ── 主题（固定暗色） ──
     logger.info("Setting theme mode: dark (forced)")
     setTheme(Theme.DARK)
 
@@ -131,6 +159,7 @@ def main() -> None:
     logger.info("Setting theme color: %s", theme_color)
     setThemeColor(theme_color)
 
+    # ── 版本检查 ──
     logger.info("Checking for updates...")
     try:
         release, error_msg = check_for_updates()
@@ -150,6 +179,7 @@ def main() -> None:
         logger.info("用户触发升级流程，应用退出")
         sys.exit(0)
 
+    # ── 核心模块 ──
     logger.debug("Initializing SteamBridge...")
     bridge = SteamBridge()
     logger.debug("Steam path detected: %s", bridge.get_steam_path() or 'Not found')
@@ -164,6 +194,7 @@ def main() -> None:
         logger.warning("Steam path not found, Lua directory not set")
     game_manager = LuaGameManager(lua_dir)
 
+    # ── 主窗口 ──
     logger.debug("Creating MainWindow...")
     window = MainWindow(bridge, game_manager, config_manager)
 
@@ -187,6 +218,7 @@ def main() -> None:
 
     exit_code = app.exec()
 
+    # ── 清理 ──
     logger.info("Application shutting down...")
     try:
         window.shutdown()
@@ -199,6 +231,7 @@ def main() -> None:
     except Exception:
         pass
 
+    # 刷新 404 缓存到磁盘
     try:
         from utils.http_client import save_404_cache_now
         save_404_cache_now()
@@ -207,6 +240,7 @@ def main() -> None:
 
     logger.info("Application exited")
     sys.exit(exit_code)
+
 
 if __name__ == "__main__":
     main()

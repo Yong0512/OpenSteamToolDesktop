@@ -1,24 +1,40 @@
+"""
+LibraryPage — 已入库游戏页面
+
+独立选项卡，以列表形式展示已入库的游戏。
+支持搜索过滤、排序、刷新、出库操作。
+每次切换到此页面时自动刷新。
+
+已移除 QNetworkAccessManager，使用 AsyncWorker+httpx 替代，避免生命周期崩溃
+"""
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+
 from qfluentwidgets import (
     ScrollArea, SubtitleLabel, CaptionLabel, BodyLabel,
-    SearchLineEdit,
+    PrimaryPushButton, PushButton, SearchLineEdit,
     ComboBox, TransparentToolButton,
     InfoBar, InfoBarPosition, FluentIcon,
     ToolTipFilter, ToolTipPosition,
 )
 
-from config import STEAM_STORE_API
 from core.game_manager import LuaGameManager, GameInfo
 from gui.widgets import GameCard
 from utils.async_worker import AsyncWorker
-from utils.logger import setup_logger
 
+from config import STEAM_STORE_API
+from utils.logger import setup_logger
 logger = setup_logger(__name__)
 
+
 def _fetch_game_name(app_id: str) -> tuple[str, str]:
+    """后台线程：通过 Steam API 获取游戏名称
+
+    Returns:
+        (app_id, name) 元组，获取失败时 name 为空字符串
+    """
     from utils.http_client import get_json
     url = f"{STEAM_STORE_API}?appids={app_id}&l=zh-CN"
     data = get_json(url, timeout=8.0)
@@ -27,8 +43,11 @@ def _fetch_game_name(app_id: str) -> tuple[str, str]:
         return (app_id, name)
     return (app_id, "")
 
-class LibraryPage(ScrollArea):
 
+class LibraryPage(ScrollArea):
+    """已入库游戏页面"""
+
+    # 信号：游戏库发生变化（出库），通知搜索页刷新推荐
     library_changed = pyqtSignal()
 
     def __init__(self, game_manager: LuaGameManager, parent=None):
@@ -37,8 +56,9 @@ class LibraryPage(ScrollArea):
         self._sort_mode = "default"
         self._games_data: list[GameInfo] = []
         self._card_list: list[GameCard] = []
-        self._alive = True
+        self._alive = True  # 安全标志
 
+        # 异步 Worker 引用（防止回调到已删除对象）
         self._load_worker = None
         self._name_workers: list[AsyncWorker] = []
 
@@ -59,8 +79,10 @@ class LibraryPage(ScrollArea):
             "QWidget#libraryContainer { background: transparent; }"
         )
 
-    def _init_ui(self):
+    # ---- UI 构建 ----
 
+    def _init_ui(self):
+        # 标题行
         header = QHBoxLayout()
         header.addWidget(SubtitleLabel("已入库的游戏", self))
 
@@ -80,6 +102,7 @@ class LibraryPage(ScrollArea):
 
         self._main_layout.addLayout(header)
 
+        # 搜索 + 排序
         toolbar = QHBoxLayout()
 
         self.filter_input = SearchLineEdit(self)
@@ -89,6 +112,7 @@ class LibraryPage(ScrollArea):
         self.filter_input.clearSignal.connect(self._on_filter_clear)
         toolbar.addWidget(self.filter_input, 1)
 
+        # 排序
         self.sort_combo = ComboBox(self)
         self.sort_combo.addItems(["默认", "A-Z", "Z-A"])
         self.sort_combo.setFixedWidth(100)
@@ -97,11 +121,13 @@ class LibraryPage(ScrollArea):
 
         self._main_layout.addLayout(toolbar)
 
+        # 游戏列表容器（纵向列表）
         self._list_layout = QVBoxLayout()
         self._list_layout.setSpacing(8)
         self._list_layout.setContentsMargins(0, 0, 0, 0)
         self._main_layout.addLayout(self._list_layout)
 
+        # 空状态提示
         self.empty_label = BodyLabel("暂无入库游戏", self)
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setVisible(False)
@@ -109,11 +135,15 @@ class LibraryPage(ScrollArea):
 
         self._main_layout.addStretch(1)
 
+    # ---- 页面显示刷新 ----
+
     def _check_injection_required(self) -> bool:
+        """返回 False 表示未注入，应禁止操作"""
         from core.app_state import app_state, DLL_ACTIVE
         return bool(app_state.get(DLL_ACTIVE, False))
 
     def showEvent(self, event):
+        """每次切换到此页面时自动刷新"""
         super().showEvent(event)
         self._alive = True
         if not self._check_injection_required():
@@ -122,17 +152,21 @@ class LibraryPage(ScrollArea):
             self._load_games_async()
 
     def _show_not_injected(self):
+        """未注入状态展示"""
         self._clear_list()
         self.refresh_btn.setEnabled(False)
         self.empty_label.setVisible(True)
         self.empty_label.setText("请先在「注入管理」页面完成 Steam 注入与激活")
         self.stats_label.setText("")
 
+    # ---- 异步加载游戏 ----
+
     def _load_games_async(self):
         if not self._check_injection_required():
             self._show_not_injected()
             return
 
+        # 取消旧 worker 防止并发
         if self._load_worker and not self._load_worker.isFinished():
             self._load_worker.cancel()
 
@@ -173,8 +207,11 @@ class LibraryPage(ScrollArea):
         InfoBar.error("错误", error, parent=self,
                       position=InfoBarPosition.TOP)
 
-    def _fetch_missing_names(self, app_ids: list[str]):
+    # ---- 补充游戏名 ----
 
+    def _fetch_missing_names(self, app_ids: list[str]):
+        """为缺少名称的游戏异步获取名称"""
+        # 清理旧 worker：先断信号防 QueuedConnection 回调，再取消
         for w in self._name_workers[:]:
             try:
                 w.finished_with_result.disconnect(self._on_name_fetched)
@@ -196,6 +233,7 @@ class LibraryPage(ScrollArea):
             self._name_workers.append(worker)
 
     def _on_name_fetched(self, result: tuple[str, str]):
+        """单个游戏名获取完成（主线程执行）"""
         if not self._alive:
             return
         try:
@@ -213,7 +251,10 @@ class LibraryPage(ScrollArea):
         except (RuntimeError, Exception) as e:
             logger.warning(f"更新游戏名失败 AppID={result[0]}: {e}")
 
+    # ---- 显示游戏列表 ----
+
     def _display_games(self, games: list[GameInfo]):
+        """以列表形式显示游戏数据"""
         self._clear_list()
 
         if not games:
@@ -227,13 +268,13 @@ class LibraryPage(ScrollArea):
                 card.removed.connect(self._on_remove_game)
                 self._list_layout.addWidget(card)
                 self._card_list.append(card)
-
+                # 错峰异步加载封面
                 QTimer.singleShot(100 + idx * 150, card.load_cover_async)
             except Exception as e:
                 logger.error(f"创建游戏卡片失败 AppID={game.app_id}: {e}")
 
         self.stats_label.setText("共 {0} 个游戏".format(len(games)))
-
+        # 应用当前排序（非 default 时需要排）
         self._apply_current_sort()
 
     def _clear_list(self):
@@ -242,6 +283,8 @@ class LibraryPage(ScrollArea):
             self._list_layout.removeWidget(card)
             card.deleteLater()
         self._card_list.clear()
+
+    # ---- 出库 ----
 
     def _on_remove_game(self, app_id: str):
         ok = self._game_manager.remove_game(app_id)
@@ -264,10 +307,13 @@ class LibraryPage(ScrollArea):
             self.stats_label.setText("共 {0} 个游戏".format(cnt) if cnt > 0 else "")
             self.empty_label.setVisible(cnt == 0)
 
+            # 通知搜索页刷新推荐（可能需要重新显示）
             self.library_changed.emit()
         else:
             InfoBar.error("出库失败", "",
                           parent=self, position=InfoBarPosition.TOP)
+
+    # ---- 过滤 / 排序 ----
 
     def _on_filter(self, text: str):
         keyword = text.lower().strip()
@@ -297,6 +343,7 @@ class LibraryPage(ScrollArea):
         self._apply_current_sort()
 
     def _apply_current_sort(self):
+        """按当前排序模式重新排列卡片"""
         if self._sort_mode == "default":
             sorted_cards = [
                 card for g in self._games_data
@@ -317,6 +364,7 @@ class LibraryPage(ScrollArea):
         else:
             return
 
+        # 重新排列
         for card in sorted_cards:
             self._list_layout.removeWidget(card)
         for card in sorted_cards:
@@ -330,7 +378,7 @@ class LibraryPage(ScrollArea):
     def hideEvent(self, event):
         super().hideEvent(event)
         self._alive = False
-
+        # 取消所有活跃 name worker，先断信号防止 QueuedConnection 回调
         for w in self._name_workers[:]:
             try:
                 w.finished_with_result.disconnect(self._on_name_fetched)

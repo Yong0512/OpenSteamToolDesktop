@@ -1,26 +1,37 @@
+"""
+GameCard — 游戏卡片组件
+
+显示游戏封面、名称、AppID，支持右键菜单（复制/出库/在Steam中查看）
+封面使用 AsyncWorker+httpx 异步加载，避免 QNetworkAccessManager 生命周期崩溃
+"""
 from __future__ import annotations
 
 import webbrowser
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QApplication
+from PyQt6.QtGui import QPixmap
+
 from qfluentwidgets import (
     CardWidget, BodyLabel, CaptionLabel,
     TransparentToolButton, FluentIcon, RoundMenu, Action,
     ToolTipFilter, ToolTipPosition, isDarkTheme,
 )
 
-from config import TEXT_COLOR
 from utils.async_worker import AsyncWorker
 from utils.download_cover import CoverCache, download_cover
 
+from config import TEXT_COLOR
+
+# 全局封面缓存（与 search_page 共享）
 _cover_cache = CoverCache.instance()
-_save_cover_disk = _cover_cache.save_to_disk
+_save_cover_disk = _cover_cache.save_to_disk  # 兼容别名
+
 
 class GameCard(CardWidget):
+    """游戏卡片：封面 + 名称 + AppID + 更多菜单"""
 
-    removed = pyqtSignal(str)
+    removed = pyqtSignal(str)  # 出库信号，携带 app_id
 
     def __init__(
         self,
@@ -32,9 +43,11 @@ class GameCard(CardWidget):
         self.app_id = app_id
         self.game_name = game_name
         self._cover_worker = None
-        self._alive = True
+        self._alive = True  # 安全标志，防止回调到已删除对象
 
         self._init_ui()
+
+    # ---- UI ----
 
     def _init_ui(self):
         self.setFixedHeight(80)
@@ -43,12 +56,14 @@ class GameCard(CardWidget):
         h_layout.setContentsMargins(15, 12, 15, 12)
         h_layout.setSpacing(15)
 
+        # 封面
         self.cover_label = QLabel(self)
         self.cover_label.setFixedSize(120, 56)
         self.cover_label.setScaledContents(True)
         self._theme_cover_bg()
         h_layout.addWidget(self.cover_label)
 
+        # 文字信息
         v_layout = QVBoxLayout()
         v_layout.setContentsMargins(0, 0, 0, 0)
         v_layout.setSpacing(4)
@@ -67,6 +82,7 @@ class GameCard(CardWidget):
         h_layout.addLayout(v_layout)
         h_layout.addStretch(1)
 
+        # 更多按钮
         self.more_button = TransparentToolButton(FluentIcon.MORE, self)
         self.more_button.setFixedSize(32, 32)
         self.more_button.setToolTip("复制 AppID")
@@ -76,13 +92,18 @@ class GameCard(CardWidget):
         self.more_button.clicked.connect(self._show_more_menu)
         h_layout.addWidget(self.more_button, 0, Qt.AlignmentFlag.AlignRight)
 
+        # 注意：不在构造函数中启动网络请求，由外部调用 load_cover_async()
+
+    # ---- 封面加载 ----
+
     def load_cover_async(self):
+        """延迟异步加载封面（必须在事件循环启动后调用）"""
         if self._cover_worker is not None:
             return
         if _cover_cache.has(self.app_id):
             pix = _cover_cache.get(self.app_id)
             if pix is None:
-                return
+                return  # 已知无封面，跳过
             if not pix.isNull():
                 self.cover_label.setPixmap(pix)
             return
@@ -110,14 +131,18 @@ class GameCard(CardWidget):
         _cover_cache.set(self.app_id, None)
 
     def cleanup(self):
+        """安全清理：取消线程、断开信号、等待线程完成"""
         self._alive = False
         if self._cover_worker is not None:
             self._cover_worker.cancel()
             self._cover_worker.finished_with_result.disconnect(self._on_cover_result)
-            self._cover_worker.wait(3000)
+            self._cover_worker.wait(3000)  # 等待线程结束，防止 QThread 销毁时仍在运行
             self._cover_worker = None
 
+    # ---- 主题 ----
+
     def notify_theme_changed(self):
+        """响应主题变化"""
         self._theme_cover_bg()
         self.update()
         self.repaint()
@@ -131,6 +156,8 @@ class GameCard(CardWidget):
             self.cover_label.setStyleSheet(
                 "border-radius: 4px; background: #f0f0f0;"
             )
+
+    # ---- 右键菜单 ----
 
     def _show_more_menu(self):
         menu = RoundMenu(parent=self)

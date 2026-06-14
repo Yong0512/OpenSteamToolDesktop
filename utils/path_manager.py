@@ -1,3 +1,17 @@
+"""
+路径管理器
+==========
+
+统一管理日志、缓存等所有输出目录。
+固定使用 Windows ``我的文档\\.OpenSteamToolDesktop\\`` 目录。
+
+.. code-block:: python
+
+    from utils.path_manager import PathManager
+
+    print(PathManager.logs_dir())       # .../Documents/.OpenSteamToolDesktop/logs/
+    print(PathManager.covers_dir())     # .../Documents/.OpenSteamToolDesktop/cache/covers/
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,11 +20,13 @@ from config import APP_NAME
 
 
 class PathManager:
+    """统一路径管理器"""
 
     _base: Path | None = None
 
     @classmethod
     def base_dir(cls) -> Path:
+        """数据根目录：``{home}\\.{APP_NAME}\\``"""
         if cls._base is None:
             cls._base = Path.home() / f".{APP_NAME}"
             cls._base.mkdir(parents=True, exist_ok=True)
