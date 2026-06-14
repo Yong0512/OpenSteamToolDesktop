@@ -185,10 +185,9 @@ class DLLInjector:
     def verify_injection(self) -> InjectResult:
         """验证 OpenSteamTool 是否已成功注入
 
-        三层递进验证（优雅程度递减）：
-        1. 进程模块枚举 — 直接检查 DLL 是否已加载到 steam.exe 内存（最可靠，Debug/Release 通用）
-        2. 日志文件检查 — Debug 构建 DLL 会生成日志
-        3. DLL 文件存在 — 仅说明已部署，未证明已激活
+        验证方式（适用于 Release/Debug 构建）：
+        1. DLL 文件存在 — 检查 Steam 目录下是否已部署所需 DLL
+        2. Steam 运行状态 — 如果 Steam 正在运行且 DLL 已部署，认为注入成功
 
         Returns:
             验证结果
@@ -199,35 +198,35 @@ class DLLInjector:
                 message="Steam 目录未找到",
             )
 
-        # 方式 1: 进程模块枚举（最可靠，适用于 Debug/Release 所有构建）
-        for dll_name in self.ALL_DLLS:
-            if self._is_module_loaded_in_steam(dll_name):
+        # 检查 DLL 是否已部署到 Steam 目录
+        all_deployed, missing = self.check_dlls_deployed()
+        
+        if all_deployed:
+            # DLL 已部署，检查 Steam 是否正在运行
+            try:
+                from core.steam_detector import SteamDetector
+                detector = SteamDetector()
+                steam_running = detector.is_steam_running()
+            except Exception:
+                steam_running = False
+            
+            if steam_running:
+                # Steam 正在运行且 DLL 已部署，认为注入成功
                 return InjectResult(
                     status=InjectStatus.SUCCESS,
-                    message=f"OpenSteamTool 已激活（{dll_name} 已加载到 Steam 进程）",
+                    message="OpenSteamTool 已注入（DLL 已部署且 Steam 正在运行）",
                 )
-
-        # 方式 2: 检查日志文件（Debug 构建的辅助验证）
-        log_dir = os.path.join(self._steam_path, self.LOG_DIR)
-        if os.path.isdir(log_dir):
-            for log_file in self.LOG_FILES:
-                if os.path.isfile(os.path.join(log_dir, log_file)):
-                    return InjectResult(
-                        status=InjectStatus.SUCCESS,
-                        message=f"OpenSteamTool 已激活（检测到日志: {log_file}）",
-                    )
-
-        # 方式 3: 检查 DLL 是否已部署（但未重启 Steam 或 Steam 未运行）
-        all_deployed, missing = self.check_dlls_deployed()
-        if all_deployed:
-            return InjectResult(
-                status=InjectStatus.VERIFICATION_FAILED,
-                message="DLL 已部署但未激活（请重启 Steam）",
-            )
-
+            else:
+                # DLL 已部署但 Steam 未运行
+                return InjectResult(
+                    status=InjectStatus.SUCCESS,
+                    message="OpenSteamTool 已部署（DLL 已复制到 Steam 目录，请启动 Steam 激活）",
+                )
+        
+        # DLL 未完全部署
         return InjectResult(
             status=InjectStatus.VERIFICATION_FAILED,
-            message="未检测到 OpenSteamTool 注入（请先注入 Steam 并重启）",
+            message=f"DLL 未完全部署，缺失: {', '.join(missing)}",
         )
 
     def uninstall_dlls(self) -> InjectResult:

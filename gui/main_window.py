@@ -61,6 +61,7 @@ class MainWindow(MSFluentWindow):
         from gui.inject_page import InjectPage
         from gui.search_page import SearchPage
         from gui.library_page import LibraryPage
+        from gui.accelerate_page import AcceleratePage
 
         # 创建页面
         self.home_page = HomePage(
@@ -69,9 +70,15 @@ class MainWindow(MSFluentWindow):
             page_switch_callback=self._switch_page,
             parent=self,
         )
+
         self.inject_page = InjectPage(bridge, config_manager, parent=self)
+
         self.search_page = SearchPage(game_manager, bridge=bridge, parent=self)
+
         self.library_page = LibraryPage(game_manager, bridge=bridge, parent=self)
+
+        self.accelerate_page = AcceleratePage(parent=self)
+        self.accelerate_page.setObjectName("acceleratePage")
 
         # 连接首页 DLL 检查信号
         self.home_page.dll_check_needed.connect(self._check_dll_version_on_startup)
@@ -90,6 +97,7 @@ class MainWindow(MSFluentWindow):
         self._inject_nav_btn = self.addSubInterface(self.inject_page, FluentIcon.DOWNLOAD, "注入管理")
         self._search_nav_btn = self.addSubInterface(self.search_page, FluentIcon.SEARCH, "搜索入库")
         self._library_nav_btn = self.addSubInterface(self.library_page, FluentIcon.LIBRARY, "游戏库")
+        self._accelerate_nav_btn = self.addSubInterface(self.accelerate_page, FluentIcon.SPEED_HIGH, "科学加速")
 
         # 底部：重启 Steam 按钮
         self._restart_nav_item = self.navigationInterface.addItem(
@@ -533,10 +541,11 @@ class MainWindow(MSFluentWindow):
                 except Exception:
                     pass
 
-        # 2. 停止 ThreadPoolExecutor（home_page 的全局 executor）
+        # 2. 清理 HomePage 的后台 worker（不再使用 ThreadPoolExecutor）
         try:
-            from gui.home_page import _executor
-            _executor.shutdown(wait=True, cancel_futures=True)
+            if hasattr(self.home_page, '_status_worker') and self.home_page._status_worker:
+                self.home_page._status_worker.cancel()
+                self.home_page._status_worker.wait(3000)
         except Exception:
             pass
 

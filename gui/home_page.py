@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Optional, Callable
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -29,6 +28,8 @@ from qfluentwidgets import (
 )
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 
+from utils.async_worker import AsyncWorker
+from utils.logger import setup_logger
 from core.steam_bridge import SteamBridge
 from core.steam_detector import SteamDetector, SteamStatus
 from core.game_manager import LuaGameManager
@@ -39,8 +40,7 @@ from config import (
 
 # ── 常量 ──────────────────────────────────────────────────
 
-# 后台线程池
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="StatusDetect")
+logger = setup_logger(__name__)
 
 # 向导步骤
 STEP_INSTALL_STEAM = 0
@@ -71,42 +71,51 @@ logger = setup_logger(__name__)
 
 
 def _detect_status(detector: SteamDetector, bridge: SteamBridge, game_manager: LuaGameManager):
-    """在后台线程执行状态检测"""
-    result = detector.detect()
-    steam_ok = result.status == SteamStatus.INSTALLED
-    steam_path = result.path if steam_ok else ""
+    """在后台线程执行状态检测
 
-    # 关键修复：检测到 Steam 后，更新 bridge 的 steam_path
-    if steam_ok and steam_path:
-        bridge._steam_path = steam_path
-        bridge._injector.set_steam_path(steam_path)
-
-    steam_running = detector.is_steam_running() if steam_ok else False
-    dll_ok = bridge.is_deployed() if steam_ok else False
-
-    if steam_ok:
-        active_ok = bridge.is_connected()
-        deployed_ok = bridge.is_deployed()
-    else:
-        active_ok = False
-        deployed_ok = False
-
-    game_count = 0
+    注意：此函数通过 AsyncWorker（QThread）调用，运行在独立线程中。
+    """
     try:
-        game_count = len(game_manager.get_games())
-    except Exception:
-        pass
+        result = detector.detect()
+        steam_ok = result.status == SteamStatus.INSTALLED
+        steam_path = result.path if steam_ok else ""
 
-    return {
-        'steam_installed': steam_ok,
-        'steam_running': steam_running,
-        'steam_path': steam_path,
-        'dll_ok': dll_ok,
-        'active_ok': active_ok,
-        'deployed_ok': deployed_ok,
-        'game_count': game_count,
-    }
+        if steam_ok and steam_path:
+            bridge._steam_path = steam_path
+            bridge._injector.set_steam_path(steam_path)
 
+        steam_running = detector.is_steam_running() if steam_ok else False
+        dll_ok = bridge.is_deployed() if steam_ok else False
+
+        if steam_ok:
+            active_ok = bridge.is_connected()
+            deployed_ok = bridge.is_deployed()
+        else:
+            active_ok = False
+            deployed_ok = False
+
+        game_count = 0
+        try:
+            game_count = len(game_manager.get_games())
+        except Exception:
+            pass
+
+        return {
+            "steam_installed": steam_ok,
+            "steam_running": steam_running,
+            "steam_path": steam_path,
+            "dll_ok": dll_ok,
+            "active_ok": active_ok,
+            "deployed_ok": deployed_ok,
+            "game_count": game_count,
+        }
+    except Exception as e:
+        logger.error(f"Status detection error: {e}")
+        return {
+            "steam_installed": False, "steam_running": False,
+            "steam_path": "", "dll_ok": False,
+            "active_ok": False, "deployed_ok": False, "game_count": 0,
+        }
 
 class _StepIndicator(QWidget):
     """三步进度指示器组件"""
@@ -250,9 +259,8 @@ class HomePage(QScrollArea):
         self._container.setStyleSheet("QWidget#homePageContainer { background: transparent; }")
 
         # 状态检测
-        self._status_future: Optional[Future] = None
-        self._status_poll_timer: Optional[QTimer] = None
         self._status: dict = {}
+        self._status_worker = None
 
         # 自动刷新定时器（页面可见时每 10 秒刷新状态）
         self._auto_refresh_timer = QTimer(self)
@@ -261,7 +269,7 @@ class HomePage(QScrollArea):
 
         self.setWidget(self._outer)
         QTimer.singleShot(50, self._update_status)
-        
+
         # DLL 检查标志：确保项目启动后只检查一次
         self._dll_check_requested = False
 
@@ -441,43 +449,40 @@ class HomePage(QScrollArea):
     # ── 状态管理 ──────────────────────────────────────────────
 
     def _update_status(self):
-        """异步更新状态"""
-        # 如果有旧的定时器，先停止
-        if self._status_poll_timer is not None:
-            self._status_poll_timer.stop()
-            self._status_poll_timer = None
-        
-        # 提交新的状态检测任务
-        self._status_future = _executor.submit(_detect_status, self._detector, self._bridge, self._game_manager)
+        """异步更新状态（使用 AsyncWorker，避免 ThreadPoolExecutor 的 COM 崩溃）"""
+        # 如果已有检测在进行中，先取消
+        if hasattr(self, '_status_worker') and self._status_worker is not None:
+            try:
+                self._status_worker.cancel()
+            except Exception:
+                pass
+            self._status_worker = None
 
-        self._status_poll_timer = QTimer(self)
-        self._status_poll_timer.timeout.connect(self._check_status_done)
-        self._status_poll_timer.start(100)
+        # 使用 AsyncWorker（基于 QThread）执行检测，避免 COM 跨线程问题
+        self._status_worker = AsyncWorker(_detect_status, self._detector, self._bridge, self._game_manager)
+        self._status_worker.finished_with_result.connect(self._on_status_result)
+        self._status_worker.finished_with_error.connect(self._on_status_error)
+        self._status_worker.start()
 
     def refresh_status(self):
         """外部调用的状态刷新接口（由其他页面信号触发）"""
         self._update_status()
 
-    def _check_status_done(self):
-        """检查后台检测是否完成"""
-        if self._status_future is None or not self._status_future.done():
-            return
-
-        if self._status_poll_timer is not None:
-            self._status_poll_timer.stop()
-            self._status_poll_timer = None
-
-        try:
-            result = self._status_future.result()
-        except Exception:
-            result = {
-                'steam_installed': False, 'steam_running': False,
-                'steam_path': '', 'dll_ok': False,
-                'active_ok': False, 'deployed_ok': False, 'game_count': 0,
-            }
-
-        self._status_future = None
+    def _on_status_result(self, result: dict):
+        """状态检测完成（主线程回调）"""
+        self._status_worker = None
         self._status = result
+        self._update_wizard_state()
+
+    def _on_status_error(self, error_msg: str):
+        """状态检测失败（主线程回调）"""
+        logger.warning(f"Status detection failed: {error_msg}")
+        self._status_worker = None
+        self._status = {
+            'steam_installed': False, 'steam_running': False,
+            'steam_path': '', 'dll_ok': False,
+            'active_ok': False, 'deployed_ok': False, 'game_count': 0,
+        }
         self._update_wizard_state()
 
     def _update_wizard_state(self):
