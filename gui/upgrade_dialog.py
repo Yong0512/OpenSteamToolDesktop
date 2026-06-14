@@ -158,11 +158,8 @@ class UpgradeDialog(QDialog):
         changelog.setReadOnly(True)
         changelog.setMinimumHeight(140)
         changelog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # 简单 Markdown → 纯文本转换（去掉 ##、** 等标记符号）
+        # body 已经是纯文本格式（HTML标签已被移除）
         body = self._release.body or "暂无更新说明"
-        # 移除 Markdown 标记符号使纯文本可读
-        body = body.replace("### ", "■ ").replace("## ", "■ ").replace("# ", "■ ")
-        body = body.replace("**", "").replace("`", "")
         changelog.setPlainText(body)
         layout.addWidget(changelog)
 
@@ -249,3 +246,44 @@ class UpgradeDialog(QDialog):
     def closeEvent(self, event):
         """禁用窗口关闭按钮"""
         event.ignore()
+
+    def _markdown_to_plain_text(self, markdown: str) -> str:
+        """
+        将 Markdown 格式转换为纯文本，保留基本结构
+
+        支持的 Markdown 格式:
+        - 标题 (# ## ###) → 转换为带符号的纯文本
+        - 加粗 (**text**) → text
+        - 列表 (- * 1.) → 保留缩进
+        - 链接 [text](url) → text (url)
+        - 行内代码 (`code`) → code
+        - 代码块 (```)
+        """
+        import re
+
+        text = markdown
+
+        # 处理标题: # ## ### 转换为 ■ 前缀
+        text = re.sub(r'^#+\s+(.+)$', r'■ \1', text, flags=re.MULTILINE)
+
+        # 处理加粗: **text** 或 __text__ → text
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+
+        # 处理行内代码: `code` → code
+        text = re.sub(r'`(.+?)`', r'\1', text)
+
+        # 处理链接: [text](url) → text (url)
+        text = re.sub(r'\[(.+?)\]\((.+?)\)', r'\1 (\2)', text)
+
+        # 处理列表标记: 保留 - * 但移除多余空白
+        text = re.sub(r'^[\s]*[-*+]\s+', '• ', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s+', '  ', text, flags=re.MULTILINE)
+
+        # 移除残余的 Markdown 标记
+        text = text.replace('```', '')
+
+        # 清理多余空行（最多保留一个空行）
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        return text.strip()

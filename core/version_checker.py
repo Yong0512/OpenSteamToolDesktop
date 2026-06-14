@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import html
 
 import httpx
 import logging
@@ -35,7 +36,7 @@ class ReleaseInfo:
     version: str           # 版本号，如 "1.2.0"
     tag_name: str          # Git 标签名，如 "v1.2.0"
     title: str             # 发布标题
-    body: str              # 更新日志（Markdown）
+    body: str              # 更新日志（纯文本，保留换行）
     html_url: str          # 发布页 URL
     published_at: str      # 发布日期
     is_newer: bool         # 是否比当前版本新
@@ -72,6 +73,127 @@ def _is_newer(latest: str, current: str) -> bool:
         return False
 
 
+def _extract_release_body(html_content: str) -> str:
+    """
+    从 GitHub Releases 页面 HTML 中提取 release body（更新说明）
+
+    使用 HTMLParser 来正确解析 markdown-body div 的内容。
+    保留原始的换行格式。
+    如果提取失败，返回空字符串。
+    """
+    try:
+        from html.parser import HTMLParser
+
+        # 定义块级元素（这些元素通常会在渲染时引入换行）
+        BLOCK_ELEMENTS = {
+            'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'li', 'ul', 'ol', 'blockquote', 'pre', 'hr'
+        }
+
+        class MarkdownBodyExtractor(HTMLParser):
+            """提取 markdown-body div 中的文本内容，保留换行格式"""
+
+            def __init__(self):
+                super().__init__()
+                self.in_markdown_body = False
+                self.div_depth = 0
+                self.capture_text = False
+                self.text_parts = []
+                self.reached_end = False
+
+            def handle_starttag(self, tag, attrs):
+                if self.reached_end:
+                    return
+
+                if tag == 'div':
+                    attrs_dict = dict(attrs)
+                    class_attr = attrs_dict.get('class', '')
+
+                    if 'markdown-body' in class_attr and not self.in_markdown_body:
+                        # 找到 markdown-body div
+                        self.in_markdown_body = True
+                        self.div_depth = 1
+                        self.capture_text = True
+                    elif self.in_markdown_body:
+                        # 在 markdown-body 内部，遇到嵌套的 div
+                        self.div_depth += 1
+
+                # 处理换行标签
+                if self.capture_text and not self.reached_end:
+                    if tag == 'br':
+                        # <br> 标签 → 换行
+                        self.text_parts.append('\n')
+                    elif tag in BLOCK_ELEMENTS:
+                        # 块级元素开始 → 添加换行（如果前面有内容）
+                        if self.text_parts and not (isinstance(self.text_parts[-1], str) and self.text_parts[-1].endswith('\n')):
+                            self.text_parts.append('\n')
+
+            def handle_endtag(self, tag):
+                if self.reached_end:
+                    return
+
+                if tag == 'div' and self.in_markdown_body:
+                    self.div_depth -= 1
+                    if self.div_depth == 0:
+                        # 找到了 markdown-body 的结束标签
+                        self.in_markdown_body = False
+                        self.capture_text = False
+                        self.reached_end = True
+                elif self.capture_text and not self.reached_end:
+                    # 块级元素结束 → 添加换行
+                    if tag in BLOCK_ELEMENTS:
+                        if self.text_parts and not (isinstance(self.text_parts[-1], str) and self.text_parts[-1].endswith('\n')):
+                            self.text_parts.append('\n')
+
+            def handle_data(self, data):
+                if self.capture_text and not self.reached_end:
+                    # 保留文本中的换行符
+                    text = data
+                    if text:
+                        # 如果文本中有换行，需要正确处理
+                        lines = text.splitlines(keepends=False)
+                        for i, line in enumerate(lines):
+                            line = line.strip()
+                            if line:
+                                self.text_parts.append(line)
+                            if i < len(lines) - 1:
+                                self.text_parts.append('\n')
+
+        parser = MarkdownBodyExtractor()
+        parser.feed(html_content)
+
+        if parser.text_parts:
+            # 拼接文本，保留换行格式
+            text = ''
+            for part in parser.text_parts:
+                if part == '\n':
+                    # 换行符
+                    if not text.endswith('\n'):
+                        text += '\n'
+                else:
+                    # 普通文本
+                    if text.endswith('\n'):
+                        text += part
+                    elif text and not text[-1].isspace():
+                        text += ' ' + part
+                    else:
+                        text += part
+
+            # 清理多余的空行（最多保留一个空行）
+            text = re.sub(r'\n{3,}', '\n\n', text)
+
+            text = text.strip()
+            logger.info("成功提取更新说明，长度: %d 字符", len(text))
+            return text
+
+        logger.warning("未找到 markdown-body 内容或内容为空")
+        return ""
+
+    except Exception as e:
+        logger.warning("提取更新说明时出错: %s", e)
+        return ""
+
+
 def _fetch_latest_release() -> Tuple[dict | None, str | None]:
     """
     直接抓取 GitHub Releases 页面，从 URL 中解析最新版本号。
@@ -85,19 +207,18 @@ def _fetch_latest_release() -> Tuple[dict | None, str | None]:
                     "User-Agent": (
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/91.0.4472.124 Safari/537.36"
+                        "Chrome/120.0.0.0 Safari/537.36"
                     ),
                 },
             )
             response.raise_for_status()
-            html = response.text
+            html_content = response.text
 
         # 从页面中提取最新 release 的 tag URL
         # 匹配形如: /yong0512/OpenSteamToolDesktop/releases/tag/v1.2.3
-        match = re.search(
-            r"/" + GITHUB_REPO_OWNER + r"/" + GITHUB_REPO_NAME + r'/releases/tag/(v?[\d\.]+)',
-            html,
-        )
+        pattern = rf"/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/tag/(v?[\d\.]+)"
+        match = re.search(pattern, html_content)
+
         if not match:
             # 备选：直接从 URL 路径中提取 tag
             final_url = str(response.url)
@@ -112,11 +233,14 @@ def _fetch_latest_release() -> Tuple[dict | None, str | None]:
 
         logger.info("从 GitHub 页面解析到最新版本: %s", tag_name)
 
+        # 提取更新说明
+        body = _extract_release_body(html_content)
+
         return {
             "tag_name": tag_name,
             "version": version,
             "name": tag_name,
-            "body": "",
+            "body": body,
             "html_url": GITHUB_RELEASES_URL + "/tag/" + tag_name,
             "published_at": "",
         }, None

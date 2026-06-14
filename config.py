@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
 # ============ 应用信息 ============
 APP_NAME: str = "OpenSteamToolDesktop"
 APP_VERSION: str = "1.0.1"
