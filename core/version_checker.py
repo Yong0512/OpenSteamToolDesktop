@@ -22,16 +22,12 @@ from config import (
     GITHUB_RELEASES_URL,
     GITHUB_REPO_NAME,
     GITHUB_REPO_OWNER,
+    SSL_VERIFY,
 )
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
-
-# SSL 证书验证配置
-# Windows 上 Python SSL 证书验证经常失败，禁用验证以提高兼容性
-# 仅针对 GitHub 请求禁用 SSL 验证（GitHub 使用有效证书，风险较低）
-_SSL_VERIFY = False
-logger.info("SSL verification disabled for Windows compatibility")
+logger.info(f"SSL verification: {'disabled' if not SSL_VERIFY else 'enabled'} (from config)")
 
 # GitHub API 请求超时（秒）
 _REQUEST_TIMEOUT: float = 5.0
@@ -210,7 +206,7 @@ def _fetch_latest_release() -> Tuple[dict | None, str | None]:
         with httpx.Client(
             timeout=_REQUEST_TIMEOUT,
             follow_redirects=True,
-            verify=_SSL_VERIFY,  # 已禁用 SSL 验证（Windows 兼容性）
+            verify=SSL_VERIFY,  # 使用 config 中的 SSL 配置
         ) as client:
             response = client.get(
                 GITHUB_RELEASES_URL + "/latest",

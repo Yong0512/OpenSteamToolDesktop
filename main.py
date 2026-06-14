@@ -60,9 +60,7 @@ from config import (
 from core.config_manager import ConfigManager
 from core.game_manager import LuaGameManager
 from core.steam_bridge import SteamBridge
-from core.version_checker import check_for_updates
 from gui.main_window import MainWindow
-from gui.upgrade_dialog import UpgradeDialog
 from utils.logger import setup_logger
 
 
@@ -159,26 +157,6 @@ def main() -> None:
     logger.info("Setting theme color: %s", theme_color)
     setThemeColor(theme_color)
 
-    # ── 版本检查 ──
-    logger.info("Checking for updates...")
-    try:
-        release, error_msg = check_for_updates()
-    except Exception as e:
-        logger.warning("更新检查异常，跳过: %s", e)
-        release, error_msg = None, None
-
-    if error_msg:
-        from gui.network_error_dialog import NetworkErrorDialog
-        NetworkErrorDialog(error_msg).exec()
-        sys.exit(1)
-
-    if release is not None:
-        logger.info("发现新版本 v%s，显示升级对话框", release.version)
-        dialog = UpgradeDialog(release)
-        dialog.exec()
-        logger.info("用户触发升级流程，应用退出")
-        sys.exit(0)
-
     # ── 核心模块 ──
     logger.debug("Initializing SteamBridge...")
     bridge = SteamBridge()
@@ -215,6 +193,32 @@ def main() -> None:
 
     window.show()
     logger.info("Application started successfully")
+
+    # ── 版本检查（延迟到事件循环启动后执行）────────
+    from core.version_checker import check_for_updates
+    from gui.network_error_dialog import NetworkErrorDialog
+    from gui.upgrade_dialog import UpgradeDialog
+    from PyQt6.QtCore import QTimer
+
+    def _do_version_check():
+        logger.info("Checking for updates...")
+        try:
+            release, error_msg = check_for_updates()
+        except Exception as e:
+            logger.warning("更新检查异常，跳过: %s", e)
+            return
+
+        if error_msg:
+            # 网络错误：非阻塞提示，用户可选择退出或继续
+            dlg = NetworkErrorDialog(error_msg, window)
+            dlg.exit_requested.connect(app.exit)
+            dlg.exec()
+
+        elif release is not None:
+            logger.info("发现新版本 v%s，显示升级对话框", release.version)
+            UpgradeDialog(release, window).exec()
+
+    QTimer.singleShot(500, _do_version_check)
 
     exit_code = app.exec()
 

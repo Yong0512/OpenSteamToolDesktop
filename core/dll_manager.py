@@ -214,57 +214,136 @@ class DLLManager(QObject):
         # 未找到任何版本
         return None
 
-    def _has_required_dlls(self, dll_dir: Path) -> bool:
-        """检查目录是否包含所需的 DLL 文件"""
+    def _has_required_dlls(self, dll_dir: Path, check_integrity: bool = True) -> bool:
+        """检查目录是否包含所需的 DLL 文件
+        
+        Args:
+            dll_dir: DLL 目录路径
+            check_integrity: 是否检查文件完整性（文件大小、有效性）
+            
+        Returns:
+            是否包含所有必需的 DLL 且文件完整
+        """
         required_dlls = DLLInjector.ALL_DLLS
         for dll_name in required_dlls:
-            if not (dll_dir / dll_name).exists():
+            dll_path = dll_dir / dll_name
+            if not dll_path.exists():
+                logger.debug(f"Missing DLL: {dll_name} in {dll_dir}")
                 return False
+            
+            # 检查文件完整性
+            if check_integrity and not self._is_dll_file_valid(dll_path):
+                logger.warning(f"Incomplete or invalid DLL: {dll_name} in {dll_dir}")
+                return False
+        
         return True
+
+    def _is_dll_file_valid(self, dll_path: Path) -> bool:
+        """检查 DLL 文件是否完整有效
+        
+        验证项目：
+        1. 文件大小 > 30KB（避免下载不完整的文件）
+        2. 尝试读取 PE 头（如果 pefile 可用）
+        3. 文件不以空字节结尾
+        
+        Args:
+            dll_path: DLL 文件路径
+            
+        Returns:
+            文件是否完整有效
+        """
+        try:
+            # 1. 检查文件大小（DLL 应该大于 30KB）
+            file_size = dll_path.stat().st_size
+            if file_size < 30 * 1024:  # 30KB
+                logger.warning(f"DLL file too small: {dll_path.name} ({file_size} bytes)")
+                return False
+            
+            # 2. 尝试读取 PE 头（验证 DLL 格式）
+            try:
+                import pefile
+                pe = pefile.PE(str(dll_path))
+                # 检查是否是有效的 DLL（有 IMAGE_FILE_DLL 标志）
+                if not (pe.FILE_HEADER.Characteristics & 0x2000):
+                    logger.warning(f"Not a valid DLL (missing DLL flag): {dll_path.name}")
+                    return False
+                logger.debug(f"DLL file valid (PE check passed): {dll_path.name}")
+            except ImportError:
+                # pefile 未安装，跳过 PE 检查
+                logger.debug("pefile not available, skipping PE header check")
+            except Exception as e:
+                logger.warning(f"Invalid PE header in {dll_path.name}: {e}")
+                return False
+            
+            # 3. 检查文件末尾不是全是空字节
+            with open(dll_path, "rb") as f:
+                f.seek(-1024, 2)  # 读取最后 1KB
+                tail = f.read()
+                if tail == b"\x00" * 1024:
+                    logger.warning(f"DLL file appears truncated (tail is all zeros): {dll_path.name}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking DLL file {dll_path}: {e}")
+            return False
 
     def check_for_updates(self) -> Tuple[bool, str, Optional[dict]]:
         """检查是否有新版本可用
-
+        
         优先检查本地是否已有最新版本的 DLL，如果有则直接设置为当前版本。
-
+        如果本地版本存在但文件不完整，会触发重新下载。
+        
         Returns:
             (是否有更新, 消息, 最新版本信息)
         """
         logger.info("Checking for DLL updates...")
-
+        
         # 获取远程最新版本
         remote_info = self._github.get_latest_release_info()
         if not remote_info:
             return False, "无法获取远程版本信息", None
-
+        
         remote_version = remote_info.get("version", "")
         if not remote_version:
             return False, "远程版本信息不完整", None
-
-        # 优先检查：本地是否已有该版本的 DLL 文件
+        
+        # 优先检查：本地是否已有该版本的 DLL 文件（且完整）
         remote_version_dir = self.get_version_dir(remote_version)
-        if remote_version_dir.exists() and self._has_required_dlls(remote_version_dir):
-            # 本地已有该版本，直接设置为当前版本
-            logger.info(f"Local already has version {remote_version}, skip download")
-            self.set_current_version(remote_version)
-            return False, f"本地已有最新版本 {remote_version}", remote_info
-
+        if remote_version_dir.exists():
+            if self._has_required_dlls(remote_version_dir, check_integrity=True):
+                # 本地已有该版本且文件完整，直接设置为当前版本
+                logger.info(f"Local already has complete version {remote_version}, skip download")
+                self.set_current_version(remote_version)
+                return False, f"本地已有最新版本 {remote_version}", remote_info
+            else:
+                # 本地有该版本目录但文件不完整，删除并重新下载
+                logger.warning(f"Local version {remote_version} exists but files are incomplete, will re-download")
+                try:
+                    import shutil
+                    shutil.rmtree(remote_version_dir)
+                    logger.info(f"Removed incomplete version directory: {remote_version_dir}")
+                except Exception as e:
+                    logger.error(f"Failed to remove incomplete directory: {e}")
+                    return True, f"发现版本 {remote_version} 但文件不完整，且无法清理，请手动删除 {remote_version_dir}", remote_info
+        
         # 获取本地当前版本
         local_version = self.get_current_version()
         if not local_version:
             local_version = self.get_latest_local_version()
-
+        
         # 比较版本号
         if not local_version:
             return True, f"发现新版本 {remote_version}，点击下载", remote_info
-
+        
         if self._compare_versions(remote_version, local_version) > 0:
             return (
                 True,
                 f"发现新版本 {remote_version}（当前：{local_version}）",
                 remote_info,
             )
-
+        
         return False, f"已是最新版本 {remote_version}", remote_info
 
     def download_and_install(self, version_info: dict) -> Tuple[bool, str]:

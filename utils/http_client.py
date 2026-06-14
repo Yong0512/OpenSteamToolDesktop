@@ -29,51 +29,42 @@ from config import (
     HTTP_DEFAULT_TIMEOUT,
     HTTP_MAX_RETRIES,
     STEAM_USER_AGENT,
+    SSL_VERIFY,
 )
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
-
-# ── SSL 证书配置 ──────────────────────────────────────────
-try:
-    import certifi
-    _SSL_VERIFY = certifi.where()
-    logger.info("Using certifi certificates for SSL verification")
-except ImportError:
-    _SSL_VERIFY = True  # 使用系统默认证书
-    logger.warning("certifi not installed, using system default SSL certificates")
+logger.info(f"SSL verification: {'disabled' if not SSL_VERIFY else 'enabled'} (from config)")
 
 # ── 系统代理配置 ──────────────────────────────────────────
-def _get_system_proxies() -> dict[str, str] | None:
+def _get_system_proxy() -> str | None:
     """获取系统代理设置（Windows 自动读取 IE/系统代理配置）
 
     Returns:
-        代理配置字典（httpx 格式），如果没有配置代理则返回 None
+        代理 URL 字符串（如 "http://proxy:port"），如果没有配置代理则返回 None
     """
     try:
         raw_proxies = urllib.request.getproxies()
         if not raw_proxies:
             return None
 
-        # 转换为 httpx 格式
-        # urllib 格式: {"http": "proxy:port"}
-        # httpx 格式: {"http://": "http://proxy:port", "https://": "http://proxy:port"}
-        converted: dict[str, str] = {}
-        for scheme, proxy_url in raw_proxies.items():
-            # 确保代理 URL 有协议头
-            if "://" not in proxy_url:
-                proxy_url = f"http://{proxy_url}"
-            key = f"{scheme}://" if "://" not in scheme else scheme
-            converted[key] = proxy_url
+        # 优先使用 HTTPS 代理，如果没有则使用 HTTP 代理
+        proxy_url = raw_proxies.get("https") or raw_proxies.get("http")
+        if not proxy_url:
+            return None
 
-        logger.info("系统代理已启用: %s", converted)
-        return converted
+        # 确保代理 URL 有协议头
+        if "://" not in proxy_url:
+            proxy_url = f"http://{proxy_url}"
+
+        logger.info("系统代理已启用: %s", proxy_url)
+        return proxy_url
     except Exception as e:
         logger.warning("读取系统代理失败: %s", e)
     return None
 
 
-_system_proxies = _get_system_proxies()
+_system_proxy = _get_system_proxy()
 
 # ── 模块级常量 ──────────────────────────────────────────────
 _DEFAULT_TIMEOUT: float = HTTP_DEFAULT_TIMEOUT
@@ -179,8 +170,8 @@ def get(
                 timeout=timeout,
                 headers=_headers,
                 follow_redirects=follow_redirects,
-                proxies=_system_proxies,  # 使用系统代理
-                verify=_SSL_VERIFY,  # 使用 SSL 证书验证
+                proxy=_system_proxy,  # 使用系统代理（单个 URL）
+                verify=SSL_VERIFY,  # 使用 config 中的 SSL 配置
             ) as client:
                 resp = client.get(url, params=params)
                 resp.raise_for_status()

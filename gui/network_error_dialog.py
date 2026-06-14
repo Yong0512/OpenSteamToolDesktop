@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import webbrowser
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QDialog, QLabel, QWidget
 
 from qfluentwidgets import (
@@ -19,11 +19,14 @@ from config import GITHUB_RELEASES_URL
 class NetworkErrorDialog(QDialog):
     """网络连接失败弹窗"""
 
+    # 信号：用户选择退出应用
+    exit_requested = pyqtSignal()
+
     def __init__(self, error_msg: str, parent=None):
         super().__init__(parent)
         self._error_msg = error_msg
         self.setWindowTitle("连接失败")
-        self.setFixedSize(520, 300)
+        self.setFixedSize(480, 310)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint | Qt.WindowType.CustomizeWindowHint)
         self.setModal(True)
 
@@ -62,7 +65,7 @@ class NetworkErrorDialog(QDialog):
 
         # 建议
         hint = BodyLabel(
-            "如果因网络限制无法访问 GitHub，可以安装 Watt Toolkit 来加速访问。",
+            "如果因网络限制无法访问 GitHub，可尝试以下方案：",
             self,
         )
         hint.setWordWrap(True)
@@ -71,28 +74,43 @@ class NetworkErrorDialog(QDialog):
 
         layout.addStretch()
 
-        # 按钮行
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(12)
+        # ── 按钮区（两行布局）────────────────────────────
+
+        # 第一行：主操作 + 退出
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(12)
 
         self.github_btn = PrimaryPushButton(FluentIcon.GITHUB, "前往项目主页", self)
-        self.github_btn.setMinimumWidth(165)
+        self.github_btn.setMinimumWidth(160)
         self.github_btn.clicked.connect(self._on_github)
 
+        self.exit_btn = PushButton("退出", self)
+        self.exit_btn.setMinimumWidth(80)
+        self.exit_btn.clicked.connect(self._on_exit)
+
+        primary_row.addWidget(self.github_btn)
+        primary_row.addStretch()
+        primary_row.addWidget(self.exit_btn)
+
+        # 第二行：辅助方案（居中）
+        helper_row = QHBoxLayout()
+        helper_row.setSpacing(12)
+
         self.watt_btn = PushButton(FluentIcon.DOWNLOAD, "安装 Watt Toolkit", self)
-        self.watt_btn.setMinimumWidth(165)
+        self.watt_btn.setMinimumWidth(155)
         self.watt_btn.clicked.connect(self._on_watt)
 
-        self.exit_btn = PushButton("退出", self)
-        self.exit_btn.setMinimumWidth(100)
-        self.exit_btn.clicked.connect(self.reject)
+        self.vpn_btn = PushButton(FluentIcon.GLOBE, "科学上网(2元)", self)
+        self.vpn_btn.setMinimumWidth(130)
+        self.vpn_btn.clicked.connect(self._on_vpn)
 
-        btn_layout.addWidget(self.github_btn)
-        btn_layout.addWidget(self.watt_btn)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.exit_btn)
+        helper_row.addStretch()
+        helper_row.addWidget(self.watt_btn)
+        helper_row.addWidget(self.vpn_btn)
+        helper_row.addStretch()
 
-        layout.addLayout(btn_layout)
+        layout.addLayout(primary_row)
+        layout.addLayout(helper_row)
 
     def _apply_theme(self):
         dark = isDarkTheme()
@@ -111,4 +129,13 @@ class NetworkErrorDialog(QDialog):
 
     def _on_watt(self):
         webbrowser.open("ms-windows-store://pdp/?productid=9MTCFHS560NG")
+        self.reject()
+
+    def _on_vpn(self):
+        webbrowser.open("https://xn--9kqz23b19z.com/#/register?code=fVqOtCnc")
+        self.reject()
+
+    def _on_exit(self):
+        """用户点击退出，通知主窗口退出应用"""
+        self.exit_requested.emit()
         self.reject()

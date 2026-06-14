@@ -25,9 +25,10 @@ import httpx
 from core.game_manager import DepotInfo, GameMetadata
 from utils.logger import setup_logger
 
-from config import STEAM_STORE_API, STEAMCMD_API, TOKEN_API, DEPOT_KEYS_API_ALT
+from config import STEAM_STORE_API, STEAMCMD_API, TOKEN_API, DEPOT_KEYS_API_ALT, SSL_VERIFY
 
 logger = setup_logger(__name__)
+logger.info(f"SSL verification: {'disabled' if not SSL_VERIFY else 'enabled'} (from config)")
 
 # ── MetadataFetcher ───────────────────────────────────────
 
@@ -62,6 +63,7 @@ class MetadataFetcher:
 
         # 同步 HTTP 客户端（在 worker 线程中使用）
         self._http = httpx.Client(
+            verify=SSL_VERIFY,  # 使用 config 中的 SSL 配置
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

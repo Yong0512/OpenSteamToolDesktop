@@ -24,7 +24,7 @@ import httpx
 
 from utils.logger import setup_logger
 
-from config import STEAM_CDN_API
+from config import STEAM_CDN_API, SSL_VERIFY
 
 logger = setup_logger(__name__)
 
@@ -100,6 +100,7 @@ class ManifestDownloader:
             },
             timeout=30.0,
             follow_redirects=True,
+            verify=SSL_VERIFY,  # Windows 兼容性：禁用 SSL 证书验证
         )
 
         logger.debug(f"ManifestDownloader initialized: steam_path={steam_path}")

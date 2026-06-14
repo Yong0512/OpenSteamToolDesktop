@@ -65,6 +65,7 @@ CRASH_LOG_ENABLED: bool = False
 HTTP_DEFAULT_TIMEOUT: float = 15.0
 HTTP_COVER_TIMEOUT: float = 5.0
 HTTP_MAX_RETRIES: int = 2
+SSL_VERIFY: bool = False  # Windows 兼容性：禁用 SSL 证书验证
 
 STEAM_USER_AGENT: str = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

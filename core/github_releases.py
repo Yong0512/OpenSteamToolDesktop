@@ -18,19 +18,14 @@ import urllib3
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from utils.logger import setup_logger
-from config import HTTP_DEFAULT_TIMEOUT, OPENSTEAMTOOL_REPO_URL, OPENSTEAMTOOL_RELEASES_URL
+from config import HTTP_DEFAULT_TIMEOUT, OPENSTEAMTOOL_REPO_URL, OPENSTEAMTOOL_RELEASES_URL, SSL_VERIFY
 
 # 禁用 SSL 警告（已主动禁用 verify，避免日志被 InsecureRequestWarning 污染）
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 logger = setup_logger(__name__)
-
-# SSL 证书验证配置
-# Windows 上 Python SSL 证书验证经常失败，禁用验证以提高兼容性
-# 仅针对 GitHub 请求禁用 SSL 验证（GitHub 使用有效证书，风险较低）
-SSL_VERIFY = False
-logger.info("SSL verification disabled for Windows compatibility")
+logger.info(f"SSL verification: {'disabled' if not SSL_VERIFY else 'enabled'} (from config)")
 
 # DLL asset 文件名模式（64 位）
 DLL_ASSET_PATTERN: str = r"OpenSteamTool-.*\.zip"
@@ -164,14 +159,21 @@ class GitHubReleases(QObject):
                 logger.info(f"No ZIP link in static HTML for {version}, using fallback")
                 return self._guess_download_url(version)
 
-            # 优先选择 Debug 版本，其次 Release 版本
+            # 优先选择 Release 版本，其次 Debug 版本
             download_path = None
+            # 先尝试 Release
             for match in matches:
-                if "-Debug.zip" in match:
+                if "-Release.zip" in match:
                     download_path = match
                     break
+            # 如果没有 Release，尝试 Debug
             if download_path is None:
-                # 如果没有 Debug 版本，使用第一个匹配的 ZIP
+                for match in matches:
+                    if "-Debug.zip" in match:
+                        download_path = match
+                        break
+            # 如果都没有，使用第一个匹配的 ZIP
+            if download_path is None:
                 download_path = matches[0]
 
             download_url = f"https://github.com{download_path}"
@@ -193,10 +195,10 @@ class GitHubReleases(QObject):
         Returns:
             下载 URL，如果构造失败则返回 None
         """
-        # 常见的文件名模式（优先 Debug）
+        # 常见的文件名模式（优先 Release）
         possible_names = [
-            f"OpenSteamTool-{version}-Debug.zip",
             f"OpenSteamTool-{version}-Release.zip",
+            f"OpenSteamTool-{version}-Debug.zip",
             f"OpenSteamTool-{version}.zip",
         ]
 
