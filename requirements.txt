@@ -9,3 +9,7 @@ pytest>=8.0.0
 
 # ── 编译 ──
 nuitka>=2.0
+
+# 构建依赖（打包 exe 时需要）
+pyinstaller>=6.0
+pyinstaller-hooks-contrib>=2024.0

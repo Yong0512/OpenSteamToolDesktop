@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
@@ -45,7 +46,7 @@ def clean():
     print("Clean complete.")
 
 
-def build_pyinstaller():
+def build_pyinstaller(*, no_zip: bool = False):
     """执行 PyInstaller 打包"""
     if not SPEC_FILE.exists():
         print(f"Error: {SPEC_FILE} not found.")
@@ -90,8 +91,11 @@ def build_pyinstaller():
     print(f"\nBuild successful!")
     print(f"Output: {exe_path}  ({size_mb:.1f} MB)")
 
+    if not no_zip:
+        zip_dist()
 
-def build_nuitka():
+
+def build_nuitka(*, no_zip: bool = False):
     """执行 Nuitka 编译打包（C++ 编译，单文件，代码保护更强）"""
     print("=" * 60)
     print("OpenSteamToolDesktop Nuitka Onefile Build")
@@ -143,11 +147,66 @@ def build_nuitka():
     print(f"\nBuild successful!")
     print(f"Output: {exe_path}  ({size_mb:.1f} MB)")
 
+    if not no_zip:
+        zip_dist()
+
+
+def get_version() -> str:
+    """从 config.py 读取版本号"""
+    config_py = PROJECT_ROOT / "config.py"
+    if config_py.exists():
+        for line in config_py.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("APP_VERSION") or line.startswith("VERSION"):
+                # APP_VERSION: str = "1.0.2"  或  VERSION = "v1.0.1"
+                val = line.split("=", 1)[-1].strip().strip("\"'")
+                return val
+    return "unknown"
+
+
+def zip_dist():
+    """将打包产物压缩为 Zip 包"""
+    version = get_version()
+    zip_name = f"OpenSteamToolDesktop-{version}.zip"
+    zip_path = PROJECT_ROOT / zip_name
+
+    # PyInstaller 产物：dist/OpenSteamToolDesktop/ 目录
+    pyinstaller_dir = DIST_DIR / "OpenSteamToolDesktop"
+    # Nuitka 产物：dist/OpenSteamToolDesktop.exe 单文件
+    nuitka_exe = DIST_DIR / "OpenSteamToolDesktop.exe"
+
+    if pyinstaller_dir.is_dir():
+        source_dir = pyinstaller_dir
+        arc_root = f"OpenSteamToolDesktop-{version}"
+        print(f"\nZipping: {source_dir} -> {zip_path.name}")
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(source_dir):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    # 归档名：arc_root/相对路径
+                    arc_name = arc_root + "/" + os.path.relpath(full_path, source_dir)
+                    zf.write(full_path, arc_name)
+
+    elif nuitka_exe.exists():
+        print(f"\nZipping: {nuitka_exe.name} -> {zip_path.name}")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            arc_name = f"OpenSteamToolDesktop-{version}/OpenSteamToolDesktop.exe"
+            zf.write(nuitka_exe, arc_name)
+
+    else:
+        print("\nNothing to zip: dist/ is empty.")
+        return
+
+    zip_size = zip_path.stat().st_size / (1024 * 1024)
+    print(f"Zip created: {zip_path}  ({zip_size:.1f} MB)")
+
 
 def main():
     parser = argparse.ArgumentParser(description="OpenSteamToolDesktop Build Script")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts only")
     parser.add_argument("--nuitka", action="store_true", help="Use Nuitka (C++ compile, stronger protection)")
+    parser.add_argument("--no-zip", action="store_true", help="Skip creating zip package after build")
     args = parser.parse_args()
 
     if args.clean:
@@ -155,9 +214,9 @@ def main():
     else:
         clean()
         if args.nuitka:
-            build_nuitka()
+            build_nuitka(no_zip=args.no_zip)
         else:
-            build_pyinstaller()
+            build_pyinstaller(no_zip=args.no_zip)
 
 
 if __name__ == "__main__":
