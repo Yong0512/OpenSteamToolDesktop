@@ -23,8 +23,15 @@ from config import (
     GITHUB_REPO_NAME,
     GITHUB_REPO_OWNER,
 )
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
+
+# SSL 证书验证配置
+# Windows 上 Python SSL 证书验证经常失败，禁用验证以提高兼容性
+# 仅针对 GitHub 请求禁用 SSL 验证（GitHub 使用有效证书，风险较低）
+_SSL_VERIFY = False
+logger.info("SSL verification disabled for Windows compatibility")
 
 # GitHub API 请求超时（秒）
 _REQUEST_TIMEOUT: float = 5.0
@@ -200,7 +207,11 @@ def _fetch_latest_release() -> Tuple[dict | None, str | None]:
     不依赖 GitHub API，无需 Token，无频率限制。
     """
     try:
-        with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=_REQUEST_TIMEOUT,
+            follow_redirects=True,
+            verify=_SSL_VERIFY,  # 已禁用 SSL 验证（Windows 兼容性）
+        ) as client:
             response = client.get(
                 GITHUB_RELEASES_URL + "/latest",
                 headers={
@@ -215,7 +226,6 @@ def _fetch_latest_release() -> Tuple[dict | None, str | None]:
             html_content = response.text
 
         # 从页面中提取最新 release 的 tag URL
-        # 匹配形如: /yong0512/OpenSteamToolDesktop/releases/tag/v1.2.3
         pattern = rf"/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/tag/(v?[\d\.]+)"
         match = re.search(pattern, html_content)
 

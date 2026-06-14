@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,47 @@ from config import (
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# ── SSL 证书配置 ──────────────────────────────────────────
+try:
+    import certifi
+    _SSL_VERIFY = certifi.where()
+    logger.info("Using certifi certificates for SSL verification")
+except ImportError:
+    _SSL_VERIFY = True  # 使用系统默认证书
+    logger.warning("certifi not installed, using system default SSL certificates")
+
+# ── 系统代理配置 ──────────────────────────────────────────
+def _get_system_proxies() -> dict[str, str] | None:
+    """获取系统代理设置（Windows 自动读取 IE/系统代理配置）
+
+    Returns:
+        代理配置字典（httpx 格式），如果没有配置代理则返回 None
+    """
+    try:
+        raw_proxies = urllib.request.getproxies()
+        if not raw_proxies:
+            return None
+
+        # 转换为 httpx 格式
+        # urllib 格式: {"http": "proxy:port"}
+        # httpx 格式: {"http://": "http://proxy:port", "https://": "http://proxy:port"}
+        converted: dict[str, str] = {}
+        for scheme, proxy_url in raw_proxies.items():
+            # 确保代理 URL 有协议头
+            if "://" not in proxy_url:
+                proxy_url = f"http://{proxy_url}"
+            key = f"{scheme}://" if "://" not in scheme else scheme
+            converted[key] = proxy_url
+
+        logger.info("系统代理已启用: %s", converted)
+        return converted
+    except Exception as e:
+        logger.warning("读取系统代理失败: %s", e)
+    return None
+
+
+_system_proxies = _get_system_proxies()
 
 # ── 模块级常量 ──────────────────────────────────────────────
 _DEFAULT_TIMEOUT: float = HTTP_DEFAULT_TIMEOUT
@@ -137,6 +179,8 @@ def get(
                 timeout=timeout,
                 headers=_headers,
                 follow_redirects=follow_redirects,
+                proxies=_system_proxies,  # 使用系统代理
+                verify=_SSL_VERIFY,  # 使用 SSL 证书验证
             ) as client:
                 resp = client.get(url, params=params)
                 resp.raise_for_status()

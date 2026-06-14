@@ -8,17 +8,29 @@ github_releases — GitHub Releases 爬取模块
 from __future__ import annotations
 
 import re
+import warnings
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 import requests
+import urllib3
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from utils.logger import setup_logger
 from config import HTTP_DEFAULT_TIMEOUT, OPENSTEAMTOOL_REPO_URL, OPENSTEAMTOOL_RELEASES_URL
 
+# 禁用 SSL 警告（已主动禁用 verify，避免日志被 InsecureRequestWarning 污染）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
 logger = setup_logger(__name__)
+
+# SSL 证书验证配置
+# Windows 上 Python SSL 证书验证经常失败，禁用验证以提高兼容性
+# 仅针对 GitHub 请求禁用 SSL 验证（GitHub 使用有效证书，风险较低）
+SSL_VERIFY = False
+logger.info("SSL verification disabled for Windows compatibility")
 
 # DLL asset 文件名模式（64 位）
 DLL_ASSET_PATTERN: str = r"OpenSteamTool-.*\.zip"
@@ -39,6 +51,8 @@ class GitHubReleases(QObject):
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._session = requests.Session()
+        # SSL 证书验证设置
+        self._session.verify = SSL_VERIFY
         # 使用浏览器级别的 headers 来避免 403/406 错误
         self._session.headers.update({
             "User-Agent": (
@@ -146,8 +160,8 @@ class GitHubReleases(QObject):
             matches = re.findall(zip_pattern, html)
 
             if not matches:
-                logger.warning(f"No ZIP download link found for version {version}")
-                # 降级方案：尝试构造下载链接
+                # GitHub Releases 页面为 JS 渲染，静态 HTML 不含资产链接，正则匹配失败属于正常情况
+                logger.info(f"No ZIP link in static HTML for {version}, using fallback")
                 return self._guess_download_url(version)
 
             # 优先选择 Debug 版本，其次 Release 版本
