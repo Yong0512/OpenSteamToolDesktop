@@ -30,6 +30,8 @@ from core.game_manager import LuaGameManager
 from core.metadata_fetcher import MetadataFetcher
 from utils.async_worker import AsyncWorker
 from utils.logger import setup_logger
+from core.app_state import app_state, DLL_VERSION_MISMATCH
+
 from utils.download_cover import CoverCache, download_cover
 
 from config import TEXT_COLOR, STEAM_STORE_API, STEAM_CDN_BASE, STEAM_STORE_SEARCH_RESULTS
@@ -709,6 +711,20 @@ class SearchPage(ScrollArea):
     # ── 入库逻辑 ──────────────────────────────────────────────
 
     def _on_add_game(self, app_id: str, game_name: str):
+        # 检查 DLL 版本是否不匹配
+        if app_state.get(DLL_VERSION_MISMATCH):
+            msg_box = MessageBox(
+                "DLL 版本警告",
+                "当前 DLL 不是最新版本，建议更新后再入库。\n\n是否立即更新？",
+                self
+            )
+            msg_box.yesButton.setText("立即更新")
+            msg_box.cancelButton.setText("继续入库")
+            
+            if msg_box.exec():
+                self._update_and_inject()
+                return  # 更新后不继续入库（需要重启 Steam）
+        
         if self._game_manager.has_game(app_id):
             InfoBar.warning(
                 "已入库", f"AppID {app_id} 已在游戏库中",
@@ -750,6 +766,7 @@ class SearchPage(ScrollArea):
 
     def _do_fetch_metadata(self, app_id: str, game_name: str) -> dict | None:
         """后台线程：获取元数据 → 写 Lua（Manifest 由 DLL 自动下载）"""
+        fetcher = None
         try:
             fetcher = MetadataFetcher()
             metadata = fetcher.fetch_all(app_id)
@@ -764,6 +781,13 @@ class SearchPage(ScrollArea):
         except Exception as e:
             logger.warning(f"Metadata fetch failed for {app_id}: {e}")
             return None
+        finally:
+            # 确保 HTTP 客户端被正确关闭，避免资源泄露
+            if fetcher is not None:
+                try:
+                    fetcher.close()
+                except Exception as e:
+                    logger.debug(f"Close fetcher failed: {e}")
 
     def _on_metadata_done(self, app_id: str, result: dict | None):
         """后台元数据获取完成（静默处理）"""
@@ -790,12 +814,29 @@ class SearchPage(ScrollArea):
         self._active_workers.append(worker)
 
     def _cancel_all_workers(self):
-        """取消所有活跃 worker 并等待完成"""
+        """等待所有活跃 worker 完成并清理
+        
+        注意：不在 hideEvent 中调用此方法，避免强制取消正在完成的任务。
+        改为在页面销毁时等待所有 worker 完成。
+        """
         for w in self._active_workers[:]:
-            w.cancel()
-            w.wait(2000)
+            if w.isRunning():
+                # 等待线程完成（最多 5 秒），不要强制终止
+                w.wait(5000)
+            if w in self._active_workers:
+                self._active_workers.remove(w)
             if w.isFinished():
                 w.deleteLater()
+        self._active_workers.clear()
+
+    def wait_for_workers(self):
+        """等待所有后台任务完成（程序退出时调用）"""
+        if not self._active_workers:
+            return
+        logger.info(f"Waiting for {len(self._active_workers)} worker(s) to finish...")
+        for w in self._active_workers[:]:
+            if w.isRunning():
+                w.wait(3000)  # 最多等待 3 秒
             if w in self._active_workers:
                 self._active_workers.remove(w)
         self._active_workers.clear()
@@ -804,7 +845,10 @@ class SearchPage(ScrollArea):
 
     def hideEvent(self, event):
         super().hideEvent(event)
-        self._cancel_all_workers()
+        # 不再强制取消 worker，避免线程还在运行时被销毁导致闪退
+        # 后台任务（如元数据获取）应该继续完成
+        # 搜索和封面下载的 worker 会在完成后自动清理
+        pass
 
     def _refresh_recommendations(self):
         for card in self._rec_cards:
@@ -835,6 +879,108 @@ class SearchPage(ScrollArea):
             card.add_btn.setEnabled(injected and not card._added)
         for card in self._rec_cards:
             card.add_btn.setEnabled(injected and not card._added)
+
+
+    # ---- DLL 版本检查 ----
+
+    def _check_dll_version_mismatch(self):
+        """检查 DLL 版本是否匹配，如果不匹配则提示用户"""
+        if self._bridge is None:
+            return
+        
+        try:
+            mismatch, mismatched_dlls = self._bridge.check_dll_version_mismatch()
+            if mismatch:
+                msg = "检测到 DLL 文件版本不匹配：\n\n"
+                msg += "\n".join([f"• {dll}" for dll in mismatched_dlls])
+                msg += "\n\n是否立即更新注入？"
+                
+                msg_box = MessageBox(
+                    "DLL 版本不匹配",
+                    msg,
+                    self
+                )
+                msg_box.yesButton.setText("立即更新")
+                msg_box.cancelButton.setText("稍后提醒")
+                
+                if msg_box.exec():
+                    self._update_and_inject()
+        except Exception as e:
+            logger.error(f"DLL 版本检查失败: {e}")
+
+    def _update_and_inject(self):
+        """更新 DLL 并重新注入"""
+        if self._bridge is None:
+            return
+        
+        # 显示进度提示
+        self._state_tool_tip = StateToolTip(
+            "正在更新",
+            "正在更新 DLL 并重新注入...",
+            self
+        )
+        self._state_tool_tip.show()
+        
+        # 1. 关闭 Steam
+        self._do_kill_steam()
+    
+    def _do_kill_steam(self):
+        """关闭 Steam"""
+        if self._bridge is None:
+            return
+        
+        success, msg = self._bridge.kill_steam()
+        if success:
+            # 等待 Steam 关闭
+            QTimer.singleShot(2000, self._do_inject)
+        else:
+            if hasattr(self, '_state_tool_tip') and self._state_tool_tip:
+                self._state_tool_tip.close()
+            InfoBar.error(
+                "错误",
+                f"关闭 Steam 失败: {msg}",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+    
+    def _do_inject(self):
+        """执行注入"""
+        if self._bridge is None:
+            return
+        
+        success, msg = self._bridge.inject()
+        if hasattr(self, '_state_tool_tip') and self._state_tool_tip:
+            self._state_tool_tip.close()
+        
+        if success:
+            # 清除 DLL 版本不匹配状态
+            app_state.set(DLL_VERSION_MISMATCH, False)
+            
+            InfoBar.success(
+                "更新成功",
+                "DLL 已更新并重新注入，请重启 Steam",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+            # 提示用户重启 Steam（使用 MessageBox 保持样式统一）
+            msg_box = MessageBox(
+                "重启 Steam",
+                "DLL 已更新并重新注入，是否立即重启 Steam？",
+                self
+            )
+            msg_box.yesButton.setText("立即重启")
+            msg_box.cancelButton.setText("稍后重启")
+            
+            if msg_box.exec():
+                self._bridge.start_steam()
+        else:
+            InfoBar.error(
+                "更新失败",
+                msg,
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+
 
     def showEvent(self, event):
         super().showEvent(event)

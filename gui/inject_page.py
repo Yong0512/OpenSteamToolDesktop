@@ -20,6 +20,7 @@ from qfluentwidgets import (
 from core.steam_bridge import SteamBridge
 from core.steam_detector import SteamDetector, SteamStatus
 from core.config_manager import ConfigManager
+from core.dll_manager import DLLManager
 from utils.logger import setup_logger
 
 
@@ -100,6 +101,10 @@ class InjectPage(ScrollArea):
         # 注入激活状态
         self.inject_status_label = BodyLabel()
         layout.addWidget(self.inject_status_label)
+
+        # DLL 版本号（新增）
+        self.dll_version_label = BodyLabel()
+        layout.addWidget(self.dll_version_label)
 
         # 刷新按钮
         refresh_btn = PushButton(FluentIcon.SYNC, "刷新状态")
@@ -258,6 +263,9 @@ class InjectPage(ScrollArea):
         else:
             self.inject_status_label.setText("✗ OpenSteamTool 未激活")
             self.inject_status_label.setStyleSheet("color: #ff9800;")
+
+        # DLL 版本号（新增）
+        self._update_dll_version_display()
 
         # 更新按钮状态
         self._update_buttons_state()
@@ -545,7 +553,34 @@ class InjectPage(ScrollArea):
                 parent=self, position=InfoBarPosition.TOP,
             )
 
-    # ---- 主题通知 ----
+    # ---- 主题通知 ---
+
+    def _update_dll_version_display(self):
+        """更新 DLL 版本号显示"""
+        try:
+            # 从 bridge 获取 DLLManager
+            dll_manager = self._bridge.get_dll_manager()
+            if dll_manager:
+                current_version = dll_manager.get_current_version()
+                dll_path = dll_manager.get_dll_path()
+                
+                if current_version:
+                    self.dll_version_label.setText(f"DLL 版本：{current_version}")
+                    self.dll_version_label.setStyleSheet("color: #52c41a;")
+                elif dll_path and dll_path.exists():
+                    # 有 DLL 目录但无法读取版本信息
+                    self.dll_version_label.setText("DLL 版本：未知（未设置当前版本）")
+                    self.dll_version_label.setStyleSheet("color: #ff9800;")
+                else:
+                    self.dll_version_label.setText("DLL 版本：未安装")
+                    self.dll_version_label.setStyleSheet("color: #f5222d;")
+            else:
+                self.dll_version_label.setText("DLL 版本：无法获取（DLLManager 未初始化）")
+                self.dll_version_label.setStyleSheet("color: #888888;")
+        except Exception as e:
+            logger.error(f"更新 DLL 版本显示失败: {e}")
+            self.dll_version_label.setText("DLL 版本：获取失败")
+            self.dll_version_label.setStyleSheet("color: #f5222d;")
 
     def notify_theme_changed(self):
         """响应主题变化"""

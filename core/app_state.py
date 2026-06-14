@@ -13,6 +13,7 @@ STEAM_RUNNING = "steam_running"
 STEAM_PATH = "steam_path"
 DLL_DEPLOYED = "dll_deployed"       # DLL 文件已部署到 Steam 目录
 DLL_ACTIVE = "dll_active"           # DLL 已加载到 Steam 进程（Debug/Release 均有效）
+DLL_VERSION_MISMATCH = "dll_version_mismatch"  # DLL 版本不匹配（用户选择稍后更新）
 GAME_COUNT = "game_count"
 
 

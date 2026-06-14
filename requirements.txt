@@ -2,6 +2,7 @@
 PyQt6>=6.4.0
 PyQt6-Fluent-Widgets>=1.5.0
 httpx>=0.25.0
+requests>=2.31.0
 
 # ── 测试 ──
 pytest>=8.0.0

@@ -202,6 +202,7 @@ class HomePage(QScrollArea):
 
     steam_status_changed = pyqtSignal(bool)
     library_need_refresh = pyqtSignal()
+    dll_check_needed = pyqtSignal()  # 请求检查 DLL 版本
 
     def __init__(
         self,
@@ -260,6 +261,9 @@ class HomePage(QScrollArea):
 
         self.setWidget(self._outer)
         QTimer.singleShot(50, self._update_status)
+        
+        # DLL 检查标志：确保项目启动后只检查一次
+        self._dll_check_requested = False
 
     def _init_ui(self):
         """构建 UI"""
@@ -709,6 +713,10 @@ class HomePage(QScrollArea):
         super().showEvent(event)
         self._update_status()
         self._auto_refresh_timer.start()
+        # 进入首页时检查 DLL 版本（只检查一次）
+        if not self._dll_check_requested:
+            self._dll_check_requested = True
+            self.dll_check_needed.emit()
 
     def hideEvent(self, event):
         super().hideEvent(event)

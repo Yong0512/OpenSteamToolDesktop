@@ -18,6 +18,7 @@ from qfluentwidgets import (
     ComboBox, TransparentToolButton,
     InfoBar, InfoBarPosition, FluentIcon,
     ToolTipFilter, ToolTipPosition,
+    MessageBox,
 )
 
 from core.game_manager import LuaGameManager, GameInfo
@@ -26,6 +27,7 @@ from utils.async_worker import AsyncWorker
 
 from config import STEAM_STORE_API
 from utils.logger import setup_logger
+from core.app_state import app_state, DLL_VERSION_MISMATCH
 logger = setup_logger(__name__)
 
 
@@ -50,9 +52,15 @@ class LibraryPage(ScrollArea):
     # 信号：游戏库发生变化（出库），通知搜索页刷新推荐
     library_changed = pyqtSignal()
 
-    def __init__(self, game_manager: LuaGameManager, parent=None):
+    def __init__(
+        self,
+        game_manager: LuaGameManager,
+        bridge=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._game_manager = game_manager
+        self._bridge = bridge
         self._sort_mode = "default"
         self._games_data: list[GameInfo] = []
         self._card_list: list[GameCard] = []
@@ -150,6 +158,16 @@ class LibraryPage(ScrollArea):
             self._show_not_injected()
         else:
             self._load_games_async()
+        
+        # 检查 DLL 版本是否不匹配，如果是则显示警告
+        if app_state.get(DLL_VERSION_MISMATCH):
+            InfoBar.warning(
+                "DLL 版本警告",
+                "当前 DLL 不是最新版本，建议更新后再使用",
+                parent=self,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+            )
 
     def _show_not_injected(self):
         """未注入状态展示"""
@@ -158,6 +176,106 @@ class LibraryPage(ScrollArea):
         self.empty_label.setVisible(True)
         self.empty_label.setText("请先在「注入管理」页面完成 Steam 注入与激活")
         self.stats_label.setText("")
+
+
+    # ---- DLL 版本检查 ----
+
+    def _check_dll_version_mismatch(self):
+        """检查 DLL 版本是否匹配，如果不匹配则提示用户"""
+        if self._bridge is None:
+            return
+        
+        try:
+            mismatch, mismatched_dlls = self._bridge.check_dll_version_mismatch()
+            if mismatch:
+                msg = "检测到 DLL 文件版本不匹配：\n\n"
+                msg += "\n".join([f"• {dll}" for dll in mismatched_dlls])
+                msg += "\n\n是否立即更新注入？"
+                
+                msg_box = MessageBox(
+                    "DLL 版本不匹配",
+                    msg,
+                    self
+                )
+                msg_box.yesButton.setText("立即更新")
+                msg_box.cancelButton.setText("稍后提醒")
+                
+                if msg_box.exec():
+                    self._update_and_inject()
+        except Exception as e:
+            logger.error(f"DLL 版本检查失败: {e}")
+
+    def _update_and_inject(self):
+        """更新 DLL 并重新注入"""
+        if self._bridge is None:
+            return
+        
+        # 显示进度提示
+        from qfluentwidgets import StateToolTip
+        self._inject_progress = StateToolTip(
+            "正在更新",
+            "正在更新 DLL 并重新注入...",
+            self
+        )
+        self._inject_progress.show()
+        
+        # 1. 关闭 Steam
+        self._do_kill_steam()
+    
+    def _do_kill_steam(self):
+        """关闭 Steam"""
+        if self._bridge is None:
+            return
+        
+        success, msg = self._bridge.kill_steam()
+        if success:
+            # 等待 Steam 关闭
+            QTimer.singleShot(2000, self._do_inject)
+        else:
+            if hasattr(self, '_inject_progress') and self._inject_progress:
+                self._inject_progress.close()
+            InfoBar.error(
+                "错误",
+                f"关闭 Steam 失败: {msg}",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+    
+    def _do_inject(self):
+        """执行注入"""
+        if self._bridge is None:
+            return
+        
+        success, msg = self._bridge.inject()
+        if hasattr(self, '_inject_progress') and self._inject_progress:
+            self._inject_progress.close()
+        
+        if success:
+            InfoBar.success(
+                "更新成功",
+                "DLL 已更新并重新注入，请重启 Steam",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+            # 提示用户重启 Steam（使用 MessageBox 保持样式统一）
+            msg_box = MessageBox(
+                "重启 Steam",
+                "DLL 已更新并重新注入，是否立即重启 Steam？",
+                self
+            )
+            msg_box.yesButton.setText("立即重启")
+            msg_box.cancelButton.setText("稍后重启")
+            
+            if msg_box.exec():
+                self._bridge.start_steam()
+        else:
+            InfoBar.error(
+                "更新失败",
+                msg,
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+
 
     # ---- 异步加载游戏 ----
 

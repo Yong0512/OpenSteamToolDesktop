@@ -33,6 +33,14 @@ class PathManager:
         return cls._base
 
     @classmethod
+    def user_data_dir(cls) -> Path:
+        """用户数据目录（base_dir 的别名，便于理解）
+
+        用于存放用户数据，如 DLL、配置等。
+        """
+        return cls.base_dir()
+
+    @classmethod
     def logs_dir(cls) -> Path:
         d = cls.base_dir() / "logs"
         d.mkdir(parents=True, exist_ok=True)

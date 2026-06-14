@@ -380,3 +380,77 @@ class DLLInjector:
             message="，".join(msg_parts) if msg_parts else "无 Lua 配置文件需要清理",
             details=removed,
         )
+
+    def check_dll_version_mismatch(self) -> tuple[bool, list[str]]:
+        """检查源DLL与已部署DLL是否一致（版本匹配检查）
+
+        通过比较文件内容哈希来判断DLL是否已更新。
+
+        Returns:
+            (是否存在版本不匹配, 不匹配的DLL列表（含详细信息）)
+        """
+        if not self._steam_path or not os.path.isdir(self._steam_path):
+            return False, ["Steam 目录未找到"]
+
+        if not self._dll_source_dir or not os.path.isdir(self._dll_source_dir):
+            return False, ["DLL 源目录未找到"]
+
+        mismatched = []
+
+        for dll_name in self.ALL_DLLS:
+            src_path = os.path.join(self._dll_source_dir, dll_name)
+            dst_path = os.path.join(self._steam_path, dll_name)
+
+            # 检查源文件是否存在
+            if not os.path.isfile(src_path):
+                mismatched.append(f"{dll_name}: 源文件不存在")
+                continue
+
+            # 检查目标文件是否存在
+            if not os.path.isfile(dst_path):
+                mismatched.append(f"{dll_name}: 未部署到 Steam 目录")
+                continue
+
+            # 比较文件哈希
+            if not self._compare_file_hash(src_path, dst_path):
+                mismatched.append(f"{dll_name}: 版本不匹配（源文件已更新）")
+
+        if mismatched:
+            logger.warning("检测到 DLL 版本不匹配: %s", "，".join(mismatched))
+            return True, mismatched
+
+        logger.info("DLL 版本检查通过：所有 DLL 均为最新版本")
+        return False, []
+
+    @staticmethod
+    def _compare_file_hash(file1: str, file2: str) -> bool:
+        """比较两个文件的 MD5 哈希值
+
+        Returns:
+            两个文件内容是否相同
+        """
+        try:
+            import hashlib
+
+            def calc_md5(filepath: str) -> str:
+                md5_hash = hashlib.md5()
+                with open(filepath, "rb") as f:
+                    # 读取文件内容，分块处理大文件
+                    for chunk in iter(lambda: f.read(8192), b""):
+                        md5_hash.update(chunk)
+                return md5_hash.hexdigest()
+
+            return calc_md5(file1) == calc_md5(file2)
+        except Exception as e:
+            logger.warning("文件哈希比较失败: %s", e)
+            # 回退到文件大小和时间比较
+            try:
+                stat1 = os.stat(file1)
+                stat2 = os.stat(file2)
+                # 比较文件大小
+                if stat1.st_size != stat2.st_size:
+                    return False
+                # 比较修改时间（允许 2 秒误差）
+                return abs(stat1.st_mtime - stat2.st_mtime) < 2.0
+            except Exception:
+                return False

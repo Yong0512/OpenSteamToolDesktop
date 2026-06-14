@@ -28,6 +28,10 @@ GITHUB_ISSUES_URL: str = f"{GITHUB_REPO_URL}/issues/new"
 GITHUB_API_LATEST_RELEASE: str = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
 GITHUB_API_LATEST: str = GITHUB_API_LATEST_RELEASE  # 别名
 
+# ============ OpenSteamTool 仓库（DLL 发布位置）============
+OPENSTEAMTOOL_REPO_URL: str = "https://github.com/OpenSteam001/OpenSteamTool"
+OPENSTEAMTOOL_RELEASES_URL: str = "https://github.com/OpenSteam001/OpenSteamTool/releases"
+
 # ============ Steam 下载 ============
 STEAM_DOWNLOAD_URL: str = "https://store.steampowered.com/about/"
 

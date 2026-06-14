@@ -76,13 +76,13 @@ def build_pyinstaller():
         print(f"\nBuild finished, but exe not found at expected path: {exe_path}")
         sys.exit(1)
 
-    dll_src = PROJECT_ROOT / "open_steam_tool"
-    dll_dst = DIST_DIR / "OpenSteamToolDesktop" / "_internal" / "open_steam_tool"
+    dll_src = PROJECT_ROOT / "resources/fallback_dlls"
+    dll_dst = DIST_DIR / "OpenSteamToolDesktop" / "_internal" / "resources/fallback_dlls"
     if dll_src.is_dir():
         if dll_dst.exists():
             shutil.rmtree(dll_dst)
         shutil.copytree(dll_src, dll_dst)
-        print(f"\nCopied open_steam_tool DLLs -> {dll_dst}")
+        print(f"\nCopied resources/fallback_dlls DLLs -> {dll_dst}")
     else:
         print(f"\nWarning: {dll_src} not found, DLLs not bundled!")
 
@@ -104,11 +104,11 @@ def build_nuitka():
         "--onefile",
         "--enable-plugin=pyqt6",
         "--windows-console-mode=disable",
-        f"--include-data-dir={PROJECT_ROOT / 'open_steam_tool'}=open_steam_tool",
+        f"--include-data-dir={PROJECT_ROOT / 'resources/fallback_dlls'}=resources/fallback_dlls",
         f"--include-data-dir={PROJECT_ROOT / 'assets'}=assets",
-        f"--include-data-files={PROJECT_ROOT / 'open_steam_tool' / 'OpenSteamTool.dll'}=open_steam_tool/OpenSteamTool.dll",
-        f"--include-data-files={PROJECT_ROOT / 'open_steam_tool' / 'dwmapi.dll'}=open_steam_tool/dwmapi.dll",
-        f"--include-data-files={PROJECT_ROOT / 'open_steam_tool' / 'xinput1_4.dll'}=open_steam_tool/xinput1_4.dll",
+        f"--include-data-files={PROJECT_ROOT / 'resources/fallback_dlls' / 'OpenSteamTool.dll'}=resources/fallback_dlls/OpenSteamTool.dll",
+        f"--include-data-files={PROJECT_ROOT / 'resources/fallback_dlls' / 'dwmapi.dll'}=resources/fallback_dlls/dwmapi.dll",
+        f"--include-data-files={PROJECT_ROOT / 'resources/fallback_dlls' / 'xinput1_4.dll'}=resources/fallback_dlls/xinput1_4.dll",
         "--output-filename=OpenSteamToolDesktop.exe",
         f"--output-dir={DIST_DIR}",
         "--company-name=OpenSteamToolDesktop",
