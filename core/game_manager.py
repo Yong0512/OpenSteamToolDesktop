@@ -234,6 +234,131 @@ class LuaGameManager:
             logger.error(f"Failed to write Lua file for {metadata.app_id}: {e}")
             return False
 
+    def parse_lua_to_metadata(self, app_id: str) -> "GameMetadata | None":
+        """解析指定游戏的 Lua 文件，还原为 GameMetadata 对象
+
+        用于编辑功能：将磁盘上的 Lua 文件解析为结构化数据，
+        用户编辑后再通过 add_game_with_metadata() 写回。
+
+        Returns:
+            GameMetadata 对象；文件不存在或解析失败返回 None
+        """
+        if not self._lua_dir:
+            logger.error("Cannot parse: lua_dir is not set")
+            return None
+
+        filepath = os.path.join(self._lua_dir, f"{app_id}.lua")
+        if not os.path.exists(filepath):
+            logger.warning(f"Lua file not found for {app_id}: {filepath}")
+            return None
+
+        logger.info(f"Parsing Lua file to metadata: {filepath}")
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+
+        except (OSError, UnicodeDecodeError) as e:
+            logger.error(f"Failed to read Lua file {filepath}: {e}")
+            return None
+
+        # ── 初始化元数据 ──
+        metadata = GameMetadata(app_id=app_id)
+
+        # ── 1. 解析游戏名称（第一行注释）──
+        name_match = re.search(
+            r'^--\s*(.+?)(?:\s*\(由 OpenSteamToolDesktop 管理\))?\s*$',
+            content, re.MULTILINE,
+        )
+        if name_match:
+            raw_name = name_match.group(1).strip()
+            if "由" not in raw_name:
+                metadata.name = raw_name
+                logger.debug(f"  Parsed name: {raw_name}")
+
+        # ── 2. 解析所有 addappid 行 ──
+        # 正则：addappid(ID)  或  addappid(ID, 0, "KEY")
+        addappid_pattern = re.compile(
+            r'addappid\(\s*(\d+)(?:\s*,\s*0\s*,\s*"([^"]*)")?\s*\)',
+            re.IGNORECASE,
+        )
+
+        # 收集所有 addappid 条目，(depot_id, depot_key_or_None)
+        addappid_entries: list[tuple[str, str]] = []
+        for m in addappid_pattern.finditer(content):
+            depot_id = m.group(1)
+            depot_key = m.group(2) or ""
+            addappid_entries.append((depot_id, depot_key))
+            logger.debug(f"  Found addappid: id={depot_id}, key={'yes' if depot_key else 'no'}")
+
+        # 第一个 addappid 是主游戏
+        if addappid_entries:
+            main_id, main_key = addappid_entries[0]
+            if main_key:
+                metadata.app_level_key = main_key
+                logger.debug(f"  App-level key found for {main_id}")
+
+        # 其余 addappid 条目：先尝试匹配已知的 depots/dlc，
+        # 无法区分时暂存为 depot（写入时 depot 行格式一致）
+        remaining = addappid_entries[1:]  # 排除主游戏
+
+        # 从现有 metadata.depots 获取已知的 depot_id（如果从其他来源）
+        # 此处先从 Lua 文件重新构建
+        seen_ids = {app_id}  # 主游戏 ID 已处理
+
+        for depot_id, depot_key in remaining:
+            if depot_id == app_id:
+                seen_ids.add(depot_id)
+                continue
+            seen_ids.add(depot_id)
+
+            # 判断是否是 DLC：ID 不在常见 depot 范围（启发式：depot ID 通常 > app_id + 100）
+            # 保守策略：全部作为 depot 处理，用户可在 UI 中调整
+            depot_info = DepotInfo(depot_id=depot_id, depot_key=depot_key)
+            metadata.depots.append(depot_info)
+
+        # ── 3. 解析 addtoken 行 ──
+        token_pattern = re.compile(
+            r'addtoken\(\s*(\d+)\s*,\s*"([^"]*)"\s*\)',
+            re.IGNORECASE,
+        )
+        for m in token_pattern.finditer(content):
+            token_app_id = m.group(1)
+            token_value = m.group(2)
+            if token_app_id == app_id:
+                metadata.access_token = token_value
+                logger.debug(f"  Parsed access_token for {app_id}")
+
+        # ── 4. 解析 setManifestid / setAppTicket（如有）──
+        # 当前 _build_lua_content 不使用这两个函数，但保留解析能力
+        manifest_pattern = re.compile(
+            r'setManifestid\(\s*(\d+)\s*,\s*(\d+)\s*\)',
+            re.IGNORECASE,
+        )
+        for m in manifest_pattern.finditer(content):
+            depot_id = m.group(1)
+            manifest_gid = m.group(2)
+            # 尝试匹配已有 depot
+            found = False
+            for d in metadata.depots:
+                if d.depot_id == depot_id:
+                    d.manifest_gid = manifest_gid
+                    found = True
+                    break
+            if not found:
+                metadata.depots.append(
+                    DepotInfo(depot_id=depot_id, manifest_gid=manifest_gid)
+                )
+
+        logger.info(
+            f"Parsed metadata for {app_id}: "
+            f"name={metadata.name or '(none)'}, "
+            f"depots={len(metadata.depots)}, "
+            f"token={'yes' if metadata.access_token else 'no'}, "
+            f"app_key={'yes' if metadata.app_level_key else 'no'}"
+        )
+        return metadata
+
     def remove_game(self, app_id: str) -> bool:
         """将游戏移出库（删除 Lua 文件）
 

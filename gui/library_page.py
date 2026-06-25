@@ -10,7 +10,12 @@ LibraryPage — 已入库游戏页面
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QDialog, QFormLayout, QLineEdit, QPushButton,
+    QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
+    QGroupBox, QMessageBox, QAbstractItemView,
+)
 
 from qfluentwidgets import (
     ScrollArea, SubtitleLabel, CaptionLabel, BodyLabel,
@@ -21,8 +26,9 @@ from qfluentwidgets import (
     MessageBox,
 )
 
-from core.game_manager import LuaGameManager, GameInfo
+from core.game_manager import LuaGameManager, GameInfo, GameMetadata, DepotInfo
 from gui.widgets import GameCard
+from gui.edit_game_dialog import EditGameDialog
 from utils.async_worker import AsyncWorker
 
 from config import STEAM_STORE_API
@@ -44,6 +50,10 @@ def _fetch_game_name(app_id: str) -> tuple[str, str]:
         name = data[app_id].get("data", {}).get("name", "")
         return (app_id, name)
     return (app_id, "")
+
+
+
+
 
 
 class LibraryPage(ScrollArea):
@@ -384,6 +394,7 @@ class LibraryPage(ScrollArea):
             try:
                 card = GameCard(game.app_id, game.name, parent=self)
                 card.removed.connect(self._on_remove_game)
+                card.edit_requested.connect(self._on_edit_game)
                 self._list_layout.addWidget(card)
                 self._card_list.append(card)
                 # 错峰异步加载封面
@@ -430,6 +441,18 @@ class LibraryPage(ScrollArea):
         else:
             InfoBar.error("出库失败", "",
                           parent=self, position=InfoBarPosition.TOP)
+
+    # ---- 编辑游戏 ---
+
+    def _on_edit_game(self, app_id: str):
+        """打开编辑对话框"""
+        dialog = EditGameDialog(self._game_manager, app_id, parent=self)
+        dialog.saved.connect(self._on_game_saved)
+        dialog.exec()
+
+    def _on_game_saved(self):
+        """编辑保存后刷新列表"""
+        self._load_games_async()
 
     # ---- 过滤 / 排序 ----
 

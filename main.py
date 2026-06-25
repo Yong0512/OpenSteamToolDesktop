@@ -194,31 +194,34 @@ def main() -> None:
     window.show()
     logger.info("Application started successfully")
 
-    # ── 版本检查（延迟到事件循环启动后执行）────────
+    # ── 版本检查（异步，不阻塞 UI）────────
+    from utils.async_worker import AsyncWorker
     from core.version_checker import check_for_updates
     from gui.network_error_dialog import NetworkErrorDialog
     from gui.upgrade_dialog import UpgradeDialog
-    from PyQt6.QtCore import QTimer
 
-    def _do_version_check():
-        logger.info("Checking for updates...")
-        try:
-            release, error_msg = check_for_updates()
-        except Exception as e:
-            logger.warning("更新检查异常，跳过: %s", e)
-            return
-
+    def _on_version_check_result(result):
+        """版本检查完成（主线程回调）"""
+        release, error_msg = result
         if error_msg:
-            # 网络错误：非阻塞提示，用户可选择退出或继续
             dlg = NetworkErrorDialog(error_msg, window)
             dlg.exit_requested.connect(app.exit)
             dlg.exec()
-
         elif release is not None:
             logger.info("发现新版本 v%s，显示升级对话框", release.version)
-            UpgradeDialog(release, window).exec()
+            dlg = UpgradeDialog(release, window)
+            dlg.exec()
+            # 强制更新：无论用户点什么，都退出程序
+            logger.info("升级对话框关闭，强制退出程序（强制更新）")
+            app.quit()
 
-    QTimer.singleShot(500, _do_version_check)
+    def _on_version_check_error(e):
+        logger.warning("更新检查异常，跳过: %s", e)
+
+    _vc_worker = AsyncWorker(check_for_updates)
+    _vc_worker.finished_with_result.connect(_on_version_check_result)
+    _vc_worker.finished_with_error.connect(_on_version_check_error)
+    _vc_worker.start()
 
     exit_code = app.exec()
 

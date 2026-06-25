@@ -12,7 +12,7 @@ from pathlib import Path
 
 # ============ 应用信息 ============
 APP_NAME: str = "OpenSteamToolDesktop"
-APP_VERSION: str = "1.0.2"
+APP_VERSION: str = "1.0.3"
 
 # ============ 配置路径 ============
 CONFIG_DIR: str = str(Path.home() / f".{APP_NAME}")

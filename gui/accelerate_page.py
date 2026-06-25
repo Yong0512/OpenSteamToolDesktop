@@ -20,7 +20,6 @@ from qfluentwidgets import (
     PrimaryPushButton, PushButton, TitleLabel, BodyLabel,
     FluentIcon,
     CardWidget, StrongBodyLabel,
-    HyperlinkButton,
 )
 from utils.logger import setup_logger
 
@@ -32,9 +31,6 @@ VPN_REGISTER_URL: str = "https://xn--9kqz23b19z.com/#/register?code=fVqOtCnc"
 
 # Watt Toolkit 商店链接
 WATT_TOOLKIT_STORE_URL: str = "ms-windows-store://pdp/?productid=9MTCFHS560NG"
-
-# GitHub 项目主页
-GITHUB_REPO_URL: str = "https://github.com/OpenSteam001/OpenSteamTool"
 
 
 class AcceleratePage(QWidget):
@@ -204,21 +200,12 @@ class AcceleratePage(QWidget):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 左侧说明
+        # 说明
         hint = BodyLabel("以上方案仅供参考，请根据实际需求选择", self)
         hint.setStyleSheet("color: #888888; font-size: 12px;")
         layout.addWidget(hint)
 
         layout.addStretch()
-
-        # 右侧 GitHub 链接
-        github_link = HyperlinkButton(
-            url=GITHUB_REPO_URL,
-            text="项目主页",
-            parent=self,
-        )
-        github_link.setIcon(FluentIcon.GITHUB)
-        layout.addWidget(github_link)
 
         return widget
 

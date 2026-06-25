@@ -32,6 +32,7 @@ class GameCard(CardWidget):
     """游戏卡片：封面 + 名称 + AppID + 更多菜单"""
 
     removed = pyqtSignal(str)  # 出库信号，携带 app_id
+    edit_requested = pyqtSignal(str)  # 编辑信号，携带 app_id
 
     def __init__(
         self,
@@ -162,6 +163,8 @@ class GameCard(CardWidget):
     def _show_more_menu(self):
         menu = RoundMenu(parent=self)
 
+        menu.addAction(Action(FluentIcon.EDIT, "编辑", triggered=self._on_edit))
+        menu.addSeparator()
         menu.addAction(Action(FluentIcon.COPY, "复制 AppID", triggered=self._copy_appid))
         menu.addAction(Action(FluentIcon.COPY, "复制游戏名", triggered=self._copy_name))
         menu.addSeparator()
@@ -182,6 +185,10 @@ class GameCard(CardWidget):
 
     def _open_steam_store(self):
         webbrowser.open(f"steam://store/{self.app_id}")
+
+    def _on_edit(self):
+        """发出编辑信号"""
+        self.edit_requested.emit(self.app_id)
 
     def _confirm_remove(self):
         from qfluentwidgets import MessageBox

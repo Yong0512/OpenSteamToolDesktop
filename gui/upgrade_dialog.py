@@ -233,9 +233,9 @@ class UpgradeDialog(QDialog):
             self.move(x, y)
 
     def _on_download(self):
-        """打开下载页面并关闭应用"""
+        """打开下载页面并关闭对话框（返回 Accepted）"""
         webbrowser.open(self._release.html_url or GITHUB_RELEASES_URL)
-        self.reject()
+        self.accept()
 
     def keyPressEvent(self, event):
         """禁用 Esc 键关闭"""

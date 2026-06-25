@@ -688,6 +688,7 @@ class SearchPage(ScrollArea):
     # ── 推荐游戏 ──────────────────────────────────────────────
 
     def _show_recommendations(self):
+        """实时拉取 Steam 热销榜作为推荐，失败则降级为硬编码列表"""
         self._rec_header.setVisible(True)
         # 清除旧卡片
         for card in self._rec_cards:
@@ -696,6 +697,42 @@ class SearchPage(ScrollArea):
             card.deleteLater()
         self._rec_cards.clear()
 
+        # 显示加载状态
+        self._rec_header.findChild(SubtitleLabel).setText("热门推荐（加载中...）")
+
+        worker = AsyncWorker(_fetch_steam_top_sellers, 24)
+        worker.finished_with_result.connect(
+            lambda items: self._on_recommendations_result(items),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished_with_error.connect(
+            lambda _: self._on_recommendations_error(),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._register_worker(worker)
+        worker.start()
+
+    def _on_recommendations_result(self, items: list[tuple[str, str]]):
+        """热销榜拉取成功，渲染卡片"""
+        self._rec_header.findChild(SubtitleLabel).setText("热门推荐")
+        if not items:
+            self._on_recommendations_error()
+            return
+        for idx, (appid, name) in enumerate(items):
+            card = _RecommendCard(appid, name, self)
+            card.add_requested.connect(self._on_add_game)
+            if self._game_manager.has_game(appid):
+                card.mark_added()
+            elif not self._is_injected():
+                card.add_btn.setEnabled(False)
+            self._rec_cards.append(card)
+            self._rec_layout.addWidget(card)
+            QTimer.singleShot(300 + idx * 150, card.load_cover_async)
+
+    def _on_recommendations_error(self):
+        """拉取失败，降级为硬编码列表"""
+        self._rec_header.findChild(SubtitleLabel).setText("热门推荐（离线）")
+        logger.info("Using hardcoded recommendations (fallback)")
         for idx, (appid, name) in enumerate(_RECOMMENDED[:24]):
             card = _RecommendCard(appid, name, self)
             card.add_requested.connect(self._on_add_game)
@@ -705,7 +742,6 @@ class SearchPage(ScrollArea):
                 card.add_btn.setEnabled(False)
             self._rec_cards.append(card)
             self._rec_layout.addWidget(card)
-            # 错峰异步加载封面，每张间隔 300ms
             QTimer.singleShot(300 + idx * 300, card.load_cover_async)
 
     # ── 入库逻辑 ──────────────────────────────────────────────
@@ -1134,6 +1170,30 @@ def _download_cover(app_id: str) -> bytes | None:
     url = f"{STEAM_CDN_BASE}/{app_id}/header.jpg"
     # http_client 内部会处理 404 缓存，这里直接请求
     return get_bytes(url, timeout=8.0)
+
+def _fetch_steam_top_sellers(count: int = 24) -> list[tuple[str, str]]:
+    """实时拉取 Steam 热销榜，返回 [(appid, name), ...]"""
+    from utils.http_client import get_json
+    try:
+        data = get_json(
+            "https://store.steampowered.com/api/featuredcategories/",
+            timeout=10.0,
+        )
+        if not data or "top_sellers" not in data:
+            logger.warning("Steam featured categories: no top_sellers")
+            return []
+        items = data["top_sellers"].get("items", [])
+        result = []
+        for item in items[:count]:
+            app_id = str(item.get("id", ""))
+            name = item.get("name", "").strip()
+            if app_id and name:
+                result.append((app_id, name))
+        logger.info(f"Fetched {len(result)} top sellers from Steam")
+        return result
+    except Exception as e:
+        logger.warning(f"Fetch Steam top sellers failed: {e}")
+        return []
 
 
 # ── 网络查询函数（后台线程执行）─────────────────────────────
