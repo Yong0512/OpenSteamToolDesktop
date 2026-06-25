@@ -38,6 +38,7 @@ Go to the [Releases](https://github.com/yong0512/OpenSteamToolDesktop/releases) 
 - [In-Library Result](#in-library-result)
 - [Antivirus Notice](#antivirus-notice)
 - [FAQ](#faq)
+- [Developer Guide](#developer-guide)
 - [Disclaimer](#disclaimer)
 - [License](#license)
 
@@ -148,6 +149,178 @@ This occurs when some Depots are missing decryption keys. The tool automatically
 ### How do I uninstall the injection?
 
 Click **Remove Injection** on the Injection Manager page, then restart Steam. You can also manually delete the three DLL files from your Steam root directory.
+
+---
+
+## Developer Guide
+
+This is an open-source project — contributions and debugging are welcome. Follow the steps below to set up a local development environment.
+
+### Prerequisites
+
+| Requirement | Version |
+|-------------|---------|
+| OS | Windows 10 / 11 (64-bit) |
+| Python | **3.10+** (3.12 or 3.13 recommended) |
+| Steam Client | Installed and logged in |
+| Git | Any version |
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/yong0512/OpenSteamToolDesktop.git
+cd OpenSteamToolDesktop
+```
+
+### 2. Create a Virtual Environment
+
+```bash
+# Create .venv in the project root
+python -m venv .venv
+
+# Activate it
+.venv\Scripts\activate
+```
+
+> The command prompt prefix will show `(.venv)` once activated.
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+Key dependencies:
+
+| Package | Purpose |
+|---------|---------|
+| `PyQt6` | GUI framework |
+| `PyQt6-Fluent-Widgets` | Windows 11 Fluent Design component library |
+| `httpx` | HTTP client (API requests, cover downloads) |
+| `requests` | Fallback HTTP client |
+| `pytest` | Unit testing |
+
+### 4. Run & Debug
+
+```bash
+# Launch the app
+python main.py
+```
+
+On startup, the app automatically:
+- Detects the Steam installation path (via registry)
+- Checks and downloads the required DLL (if missing)
+- Checks for app updates
+- Loads the game library
+
+**Debugging tips:**
+
+- Logs: `~/.OpenSteamToolDesktop/logs/main.log`
+- Config: `~/.OpenSteamToolDesktop/config.json`
+- DLL cache: `~/.OpenSteamToolDesktop/DLL/`
+- Lua configs: `~/.OpenSteamToolDesktop/config/lua/`
+
+### 5. IDE Debugging
+
+<details>
+<summary><b>VS Code</b></summary>
+
+1. Install the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
+2. Open the project root folder
+3. Select interpreter: `Ctrl+Shift+P` → `Python: Select Interpreter` → choose the `.venv` Python
+4. Press `F5` to debug, or add this to `launch.json`:
+
+```json
+{
+    "name": "OpenSteamToolDesktop",
+    "type": "python",
+    "request": "launch",
+    "program": "${workspaceFolder}/main.py",
+    "console": "integratedTerminal",
+    "justMyCode": false
+}
+```
+
+</details>
+
+<details>
+<summary><b>PyCharm</b></summary>
+
+1. `File → Open` the project root directory
+2. `File → Settings → Project → Python Interpreter` → select `.venv\Scripts\python.exe`
+3. Right-click `main.py` → `Debug 'main'` to set breakpoints and debug
+
+</details>
+
+### 6. Run Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run a single test file
+pytest tests/test_game_manager.py
+
+# Verbose output
+pytest -v
+```
+
+### 7. Project Structure
+
+```
+OpenSteamToolDesktop/
+├── main.py                  # Application entry point
+├── config.py                # Global config constants (URLs, colors, HTTP, etc.)
+├── requirements.txt         # Runtime dependencies
+├── build_exe.py             # Build script (PyInstaller / Nuitka)
+├── OpenSteamToolDesktop.spec # PyInstaller spec
+├── core/                    # Core business logic
+│   ├── steam_bridge.py      #   Steam bridge (DLL management, injection)
+│   ├── game_manager.py      #   Lua game config generation & management
+│   ├── metadata_fetcher.py  #   Steam metadata fetching
+│   ├── dll_manager.py       #   DLL download & version management
+│   ├── dll_injector.py      #   DLL injection & verification
+│   ├── version_checker.py   #   App version checking
+│   └── ...
+├── gui/                     # UI layer
+│   ├── main_window.py       #   Main window
+│   ├── home_page.py         #   Dashboard page
+│   ├── search_page.py       #   Search & add page
+│   ├── library_page.py      #   Game library page
+│   ├── inject_page.py       #   Injection manager page
+│   ├── accelerate_page.py   #   Network acceleration page
+│   └── widgets/             #   Custom widgets
+├── utils/                   # Utility modules
+│   ├── http_client.py       #   Unified HTTP client
+│   ├── async_worker.py      #   QThread async task wrapper
+│   ├── logger.py            #   Logging module
+│   └── ...
+├── resources/               # Static resources
+│   └── fallback_dlls/       #   Built-in fallback DLLs
+├── assets/                  # Screenshots, icons
+└── tests/                   # Unit tests
+```
+
+### 8. Build & Package
+
+```bash
+# Install build tool
+pip install pyinstaller
+
+# PyInstaller build (default, produces dist/ + Zip)
+python build_exe.py
+
+# Nuitka build (C++ compilation, stronger code protection)
+python build_exe.py --nuitka
+
+# Clean build artifacts only
+python build_exe.py --clean
+
+# Build without generating Zip
+python build_exe.py --no-zip
+```
+
+Build output goes to `dist/`, and a `OpenSteamToolDesktop-{version}.zip` is generated in the project root.
 
 ---
 
