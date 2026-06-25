@@ -49,9 +49,9 @@ class MainWindow(MSFluentWindow):
         self.setMinimumSize(900, 600)
         # 程序图标（兼容 PyInstaller 打包路径）
         if getattr(sys, 'frozen', False):
-            icon_path = Path(sys._MEIPASS) / "assets" / "icon.ico"
+            icon_path = Path(sys._MEIPASS) / "gui" / "icon.ico"
         else:
-            icon_path = Path(__file__).parent.parent / "assets" / "icon.ico"
+            icon_path = Path(__file__).parent / "icon.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         self.titleBar.raise_()

@@ -83,10 +83,20 @@ class GameCard(CardWidget):
         h_layout.addLayout(v_layout)
         h_layout.addStretch(1)
 
-        # 更多按钮
+        # ── 行内功能按钮（靠右排列）──
+        self._btn_edit = self._make_action_btn(FluentIcon.EDIT, "编辑", self._on_edit)
+        h_layout.addWidget(self._btn_edit, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._btn_steam = self._make_action_btn(FluentIcon.LINK, "在 Steam 中查看", self._open_steam_store)
+        h_layout.addWidget(self._btn_steam, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._btn_delete = self._make_action_btn(FluentIcon.DELETE, "出库", self._confirm_remove)
+        h_layout.addWidget(self._btn_delete, 0, Qt.AlignmentFlag.AlignRight)
+
+        # 更多按钮（仅保留低频的复制操作）
         self.more_button = TransparentToolButton(FluentIcon.MORE, self)
         self.more_button.setFixedSize(32, 32)
-        self.more_button.setToolTip("复制 AppID")
+        self.more_button.setToolTip("复制")
         self.more_button.installEventFilter(
             ToolTipFilter(self.more_button, showDelay=150, position=ToolTipPosition.TOP)
         )
@@ -158,19 +168,26 @@ class GameCard(CardWidget):
                 "border-radius: 4px; background: #f0f0f0;"
             )
 
+    # ---- 行内按钮 ----
+
+    def _make_action_btn(self, icon: FluentIcon, tooltip: str, slot) -> TransparentToolButton:
+        """创建一个行内透明图标按钮"""
+        btn = TransparentToolButton(icon, self)
+        btn.setFixedSize(32, 32)
+        btn.setToolTip(tooltip)
+        btn.installEventFilter(
+            ToolTipFilter(btn, showDelay=200, position=ToolTipPosition.TOP)
+        )
+        btn.clicked.connect(slot)
+        return btn
+
     # ---- 右键菜单 ----
 
     def _show_more_menu(self):
+        """⋮ 按钮只保留低频复制操作"""
         menu = RoundMenu(parent=self)
-
-        menu.addAction(Action(FluentIcon.EDIT, "编辑", triggered=self._on_edit))
-        menu.addSeparator()
         menu.addAction(Action(FluentIcon.COPY, "复制 AppID", triggered=self._copy_appid))
         menu.addAction(Action(FluentIcon.COPY, "复制游戏名", triggered=self._copy_name))
-        menu.addSeparator()
-        menu.addAction(Action(FluentIcon.LINK, "在 Steam 中查看", triggered=self._open_steam_store))
-        menu.addSeparator()
-        menu.addAction(Action(FluentIcon.DELETE, "出库", triggered=self._confirm_remove))
 
         pos = self.more_button.mapToGlobal(
             self.more_button.rect().bottomLeft()

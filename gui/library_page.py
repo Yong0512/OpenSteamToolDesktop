@@ -445,10 +445,12 @@ class LibraryPage(ScrollArea):
     # ---- 编辑游戏 ---
 
     def _on_edit_game(self, app_id: str):
-        """打开编辑对话框"""
-        dialog = EditGameDialog(self._game_manager, app_id, parent=self)
-        dialog.saved.connect(self._on_game_saved)
-        dialog.exec()
+        """打开编辑对话框（延迟到事件循环空闲，避免 COM 冲突）"""
+        def _do_open():
+            dialog = EditGameDialog(self._game_manager, app_id, parent=self)
+            dialog.saved.connect(self._on_game_saved)
+            dialog.exec()
+        QTimer.singleShot(0, _do_open)
 
     def _on_game_saved(self):
         """编辑保存后刷新列表"""

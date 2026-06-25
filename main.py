@@ -124,6 +124,15 @@ class _SafeApplication(QApplication):
 
 def main() -> None:
     """应用程序主入口"""
+    # Windows 任务栏图标：设置 AppUserModelID，否则任务栏显示 Python 默认图标
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            f"{APP_NAME}.{APP_VERSION}"
+        )
+    except Exception:
+        pass
+
     qInstallMessageHandler(_qt_message_handler)
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -132,6 +141,16 @@ def main() -> None:
     app = _SafeApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    # 设置应用程序图标（影响任务栏）
+    from pathlib import Path as _Path
+    if getattr(sys, 'frozen', False):
+        _icon_path = _Path(sys._MEIPASS) / "gui" / "icon.ico"
+    else:
+        _icon_path = _Path(__file__).parent / "gui" / "icon.ico"
+    if _icon_path.exists():
+        from PyQt6.QtGui import QIcon
+        app.setWindowIcon(QIcon(str(_icon_path)))
 
     logger = setup_logger(__name__)
     logger.info("=" * 60)
